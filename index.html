@@ -5,22 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Tareas Semanales</title>
   
-  <!-- Tailwind CSS para los estilos -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React y ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  
-  <!-- Babel para leer código React en el navegador -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Módulo de Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    // CLAVES PERSONALES DE FIREBASE
     const firebaseConfig = {
       apiKey: "AIzaSyBZbwfgDCXGimBeZW3VenutlJKm_M-w0Ic",
       authDomain: "pizarra-de-tareas-semanales.firebaseapp.com",
@@ -49,7 +43,6 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    // IDENTIFICADOR DE LA PIZARRA
     const APP_ID = "ecologicos-almeria-v1"; 
 
     const COLOR_PALETTE = [
@@ -78,7 +71,6 @@
       const [reorderingFinca, setReorderingFinca] = useState(null);
       const [draggedTaskId, setDraggedTaskId] = useState(null);
       
-      // Modales y menús
       const [showSettingsModal, setShowSettingsModal] = useState(false);
       const [settingsTab, setSettingsTab] = useState('fincas'); 
       const [editingFinca, setEditingFinca] = useState(null);
@@ -107,7 +99,6 @@
         }
       }, []);
 
-      // LÓGICA DE DÍAS RODANTES CON FECHA REAL
       useEffect(() => {
         const calculateDates = () => {
           const today = new Date();
@@ -221,52 +212,50 @@
         return () => { unsubFincas(); unsubCatalog(); unsubBoard(); unsubWorkers(); unsubHistory(); };
       }, [user]);
 
-      // LÓGICA DE HISTÓRICO Y LIMPIEZA AUTOMÁTICA
-      // 1) Guardar foto de HOY en el histórico si no existe ya
-      // 2) A las 00:00 (o cuando cambie de día), eliminar de 'board' las tareas de días estrictamente pasados (< hoy)
+      // LÓGICA DE FOTO HISTÓRICO Y LIMPIEZA
       useEffect(() => {
-        if (!fbLoaded || !user || boardTasks.length === 0 || dias.length === 0) return;
+        if (!fbLoaded || !user || dias.length === 0) return;
         
         const processDailySnapshotsAndCleanup = () => {
           const todayStr = getLocalIsoDate(new Date());
           const { db, setDoc, deleteDoc, doc } = window.FirebaseAPI;
 
-          // Encontrar el objeto del día de 'HOY' de la vista de la pizarra
-          const hoyObj = dias.find(d => d.esHoy);
-          if (hoyObj) {
-            // Tareas presentes HOY en el tablero
-            const tareasHoy = boardTasks.filter(t => t.dayId === hoyObj.id && t.dateString === hoyObj.dateString);
-            
-            tareasHoy.forEach(t => {
-              // Guardar la foto del día en la colección de histórico
+          // LIMPIEZA AUTO DE SEGURIDAD: Borrar del histórico cualquier foto que pertenezca a HOY o a días futuros
+          historyTasks.forEach(ht => {
+            if (ht.snapshotDate && ht.snapshotDate >= todayStr) {
+              deleteDoc(doc(db, 'artifacts', APP_ID, 'history', ht.id))
+                .catch(e => console.error("Error purgando foto prematura de hoy:", e));
+            }
+          });
+
+          // PROCESAR FOTOS DE DÍAS QUE YA HAN PASADO (< todayStr)
+          boardTasks.forEach(t => {
+            if (t.dateString && t.dateString < todayStr) {
+              
               const historyDoc = {
                 ...t,
-                snapshotDate: hoyObj.dateString,
+                snapshotDate: t.dateString,
                 archivedAt: Date.now(),
                 finalWorkers: t.workerIds || [],
                 finalNotes: t.notes || '',
                 finalStars: t.stars || 0
               };
-              setDoc(doc(db, 'artifacts', APP_ID, 'history', `${hoyObj.dateString}_${t.id}`), historyDoc, { merge: true })
+              
+              setDoc(doc(db, 'artifacts', APP_ID, 'history', `${t.dateString}_${t.id}`), historyDoc, { merge: true })
+                .then(() => {
+                   deleteDoc(doc(db, 'artifacts', APP_ID, 'board', t.id))
+                     .catch(e => console.error("Error limpiando tarea pasada:", e));
+                })
                 .catch(e => console.error("Error guardando foto histórico:", e));
-            });
-          }
-
-          // LIMPIEZA: Eliminar del tablero central (board) las tareas asociadas a días pasados (< todayStr)
-          boardTasks.forEach(t => {
-            if (t.dateString && t.dateString < todayStr) {
-              deleteDoc(doc(db, 'artifacts', APP_ID, 'board', t.id))
-                .catch(e => console.error("Error limpiando tarea pasada:", e));
             }
           });
         };
 
         processDailySnapshotsAndCleanup();
-        const interval = setInterval(processDailySnapshotsAndCleanup, 60000); // Revisa cada minuto
+        const interval = setInterval(processDailySnapshotsAndCleanup, 60000); 
         return () => clearInterval(interval);
-      }, [boardTasks, dias, user, fbLoaded]);
+      }, [boardTasks, historyTasks, user, fbLoaded]);
 
-      // FUNCIONES DE FINCAS
       const saveFinca = async (e) => {
         e.preventDefault();
         if (!user || !editingFinca.name.trim()) return;
@@ -295,7 +284,6 @@
         await updateDoc(doc(db, 'artifacts', APP_ID, 'fincas', swap.id), { order: current.order || (index + 1) });
       };
 
-      // FUNCIONES DE TRABAJADORES
       const addWorker = async (e) => {
         e.preventDefault();
         if (!user || !newWorkerName.trim()) return;
@@ -310,7 +298,6 @@
         await window.FirebaseAPI.deleteDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'workers', id));
       };
 
-      // FUNCIONES DE TAREAS
       const addCatalogTask = async (fincaId) => {
         if (!newTaskDesc.trim() || !user) return;
         const fincaTasks = catalog.filter(t => t.fincaId === fincaId);
@@ -443,14 +430,15 @@
       return (
         <div className="flex flex-col h-[100dvh] overflow-hidden bg-slate-50">
           
-          {/* 1. BLOQUE SUPERIOR (20%) - CABECERA + MINIMAPA */}
+          {/* 1. HISTÓRICO Y RESUMEN SEMANAL */}
           <div className="h-[20dvh] flex flex-col shrink-0 bg-white shadow-sm z-20 relative border-b">
             <header className="px-3 py-2 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-800">Tareas Semanales</h1>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => setShowCalendarModal(true)} className="bg-blue-50 hover:bg-blue-100 border border-blue-200 p-1.5 px-2 rounded-lg text-lg flex items-center justify-center text-blue-800 transition-colors shadow-sm" title="Ver Calendario e Historial">
+                {/* BOTÓN 1) HISTÓRICO */}
+                <button onClick={() => setShowCalendarModal(true)} className="bg-blue-50 hover:bg-blue-100 border border-blue-200 p-1.5 px-2 rounded-lg text-lg flex items-center justify-center text-blue-800 transition-colors shadow-sm" title="Ver Histórico">
                   📅
                 </button>
                 <button onClick={() => setShowSettingsModal(true)} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1 text-slate-700 transition-colors">
@@ -459,6 +447,7 @@
               </div>
             </header>
 
+            {/* 2) RESUMEN SEMANAL */}
             <div className="flex-1 flex w-full bg-slate-50/50 px-1 py-1 gap-1 overflow-x-auto items-start">
               {dias.map(dia => {
                 const tareasDelDia = boardTasks.filter(t => t.dayId === dia.id);
@@ -478,7 +467,7 @@
             </div>
           </div>
 
-          {/* 2. BLOQUE CENTRAL (40%) - TABLERO KANBAN */}
+          {/* 3) PRINCIPAL (TABLERO KANBAN) */}
           <div className="h-[40dvh] flex-1 overflow-x-auto overflow-y-hidden p-2 flex gap-3 items-start bg-slate-100/50">
             {dias.map(dia => {
               const tareasDelDia = boardTasks.filter(t => t.dayId === dia.id).sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -554,7 +543,7 @@
             })}
           </div>
 
-          {/* 3. BLOQUE INFERIOR (40%) - CATÁLOGO */}
+          {/* 4) TAREAS POR FINCA */}
           <div className="h-[40dvh] bg-white border-t flex flex-col shrink-0 shadow-[0_-4px_10px_rgb(0,0,0,0.1)] z-20">
             <div className="p-1.5 bg-slate-800 text-white flex justify-between items-center px-3 shrink-0 shadow-sm">
               <h2 className="font-bold flex items-center gap-1.5 text-sm">📍 Tareas por fincas <span className="font-normal text-[9px] text-slate-300 hidden sm:inline ml-1 opacity-80">(arrastra o toca la tarea que quieras mover)</span></h2>
@@ -626,9 +615,7 @@
             </div>
           </div>
 
-          {/* MODALES Y MENÚS FLOTANTES */}
-          
-          {/* MODAL CALENDARIO E HISTÓRICO STRICTO (MUESTRA SOLO FOTOS PASADAS/HOY) */}
+          {/* MODAL 1) HISTÓRICO STRICTO */}
           {showCalendarModal && (() => {
             const year = currentMonth.getFullYear();
             const month = currentMonth.getMonth();
@@ -643,7 +630,7 @@
               <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setShowCalendarModal(false); setSelectedCalendarDate(null); }}>
                 <div className="bg-white rounded-xl shadow-xl w-full max-w-sm flex flex-col overflow-hidden max-h-[90vh]" onClick={e => e.stopPropagation()}>
                   <div className="bg-blue-50 flex justify-between items-center p-3 border-b border-blue-100 shrink-0">
-                    <h2 className="font-bold text-base text-blue-900 flex items-center gap-2">📅 Histórico de Días Pasados</h2>
+                    <h2 className="font-bold text-base text-blue-900 flex items-center gap-2">📅 Histórico {selectedCalendarDate === todayStr ? <span className="text-emerald-600 text-[11px] bg-emerald-100 px-2 py-0.5 rounded-full ml-1">En vivo (Hoy)</span> : "de Días Pasados"}</h2>
                     <button onClick={() => { setShowCalendarModal(false); setSelectedCalendarDate(null); }} className="text-slate-500 text-lg hover:bg-blue-200 rounded-full w-7 h-7 flex items-center justify-center">❌</button>
                   </div>
                   <div className="p-4 overflow-y-auto">
@@ -664,8 +651,7 @@
                         const isFuture = dateStr > todayStr;
                         const isSelected = selectedCalendarDate === dateStr;
                         
-                        // Solo mostramos tareas del histórico de días pasados o de la foto de hoy
-                        const hasSnapshot = historyTasks.some(t => t.snapshotDate === dateStr);
+                        const hasSnapshot = historyTasks.some(t => t.snapshotDate === dateStr) || (isToday && boardTasks.some(t => t.dateString === dateStr));
 
                         return (
                           <div key={d} onClick={() => !isFuture && setSelectedCalendarDate(dateStr)} 
@@ -679,9 +665,14 @@
                     
                     {selectedCalendarDate && (
                       <div className="border-t pt-3">
-                        <h4 className="font-bold text-sm text-slate-700 mb-2">Fotos de tareas del {selectedCalendarDate.split('-').reverse().join('/')}</h4>
+                        <div className="flex justify-between items-center mb-2">
+                          <h4 className="font-bold text-sm text-slate-700">Foto del {selectedCalendarDate.split('-').reverse().join('/')}</h4>
+                        </div>
                         <div className="space-y-1.5">
-                          {historyTasks.filter(t => t.snapshotDate === selectedCalendarDate).map(t => {
+                          {(selectedCalendarDate === todayStr 
+                              ? boardTasks.filter(t => t.dateString === selectedCalendarDate).map(t => ({...t, snapshotDate: todayStr}))
+                              : historyTasks.filter(t => t.snapshotDate === selectedCalendarDate)
+                          ).map(t => {
                             const finca = getFincaData(t.fincaId);
                             const tWorkers = workers.filter(w => (t.workerIds || []).includes(w.id));
                             return (
@@ -700,8 +691,11 @@
                               </div>
                             )
                           })}
-                          {historyTasks.filter(t => t.snapshotDate === selectedCalendarDate).length === 0 && (
-                            <div className="text-xs text-slate-400 italic text-center p-2">No hay foto archivada para este día.</div>
+                          {(selectedCalendarDate === todayStr 
+                              ? boardTasks.filter(t => t.dateString === selectedCalendarDate)
+                              : historyTasks.filter(t => t.snapshotDate === selectedCalendarDate)
+                          ).length === 0 && (
+                            <div className="text-xs text-slate-400 italic text-center p-2">{selectedCalendarDate === todayStr ? "No hay tareas programadas para hoy." : "No hay foto archivada para este día."}</div>
                           )}
                         </div>
                       </div>
@@ -712,7 +706,7 @@
             );
           })()}
 
-          {/* VENTANA DETALLE HISTORIAL */}
+          {/* VENTANA DETALLE HISTORIAL (SOLO LECTURA) */}
           {showHistoryDetailModal && (() => {
             const finca = getFincaData(showHistoryDetailModal.fincaId);
             const taskWorkers = workers.filter(w => (showHistoryDetailModal.workerIds || []).includes(w.id));
@@ -764,7 +758,7 @@
                     )}
                     
                   </div>
-                  <div className="p-3 bg-white border-t text-center">
+                  <div className="p-3 bg-white border-t flex gap-2">
                     <button onClick={() => setShowHistoryDetailModal(null)} className="w-full py-2 bg-slate-200 text-slate-700 rounded-lg font-bold text-xs hover:bg-slate-300 transition-colors">Cerrar Visor</button>
                   </div>
                 </div>
@@ -880,7 +874,6 @@
               <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setBoardTaskMenu(null); setShowWorkersDropdown(false); }}>
                 <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[95vh]" onClick={e => e.stopPropagation()}>
                   
-                  {/* Cabecera sin número (#) */}
                   <div className={`p-3 rounded-t-xl text-white ${finca.handleColor} flex justify-between items-start`}>
                     <div>
                       <div className="text-xs font-bold opacity-90 mb-0.5">{finca.name} - {boardTaskMenu.dayId}</div>
