@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Tareas Semanales</title>
+  
+  <!-- Tailwind CSS para los estilos -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React y ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel para leer código React en el navegador -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Módulo de Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // CLAVES PERSONALES DE FIREBASE
+    const firebaseConfig = {
+      apiKey: "AIzaSyBZbwfgDCXGimBeZW3VenutlJKm_M-w0Ic",
+      authDomain: "pizarra-de-tareas-semanales.firebaseapp.com",
+      projectId: "pizarra-de-tareas-semanales",
+      storageBucket: "pizarra-de-tareas-semanales.firebasestorage.app",
+      messagingSenderId: "669734412138",
+      appId: "1:669734412138:web:bbf7994aa7e6d48dd4cf13"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    window.FirebaseAPI = {
+      auth, db, signInAnonymously, onAuthStateChanged,
+      collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, setDoc
+    };
+    
+    window.dispatchEvent(new Event('firebase-modules-loaded'));
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans overflow-hidden">
+  
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // IDENTIFICADOR DE LA PIZARRA
+    const APP_ID = "ecologicos-almeria-v1"; 
+
+    const COLOR_PALETTE = [
+      { id: 'purple', color: 'bg-purple-100 border-purple-500 text-purple-900', handleColor: 'bg-purple-500' },
+      { id: 'red', color: 'bg-red-100 border-red-500 text-red-900', handleColor: 'bg-red-500' },
+      { id: 'orange', color: 'bg-orange-100 border-orange-500 text-orange-900', handleColor: 'bg-orange-500' },
+      { id: 'green', color: 'bg-green-100 border-green-500 text-green-900', handleColor: 'bg-green-500' },
+      { id: 'black', color: 'bg-slate-200 border-slate-800 text-slate-900', handleColor: 'bg-slate-800' },
+      { id: 'blue', color: 'bg-blue-100 border-blue-500 text-blue-900', handleColor: 'bg-blue-500' },
+      { id: 'pink', color: 'bg-pink-100 border-pink-500 text-pink-900', handleColor: 'bg-pink-500' },
+      { id: 'yellow', color: 'bg-yellow-100 border-yellow-500 text-yellow-900', handleColor: 'bg-yellow-500' }
+    ];
+
+    function App() {
+      const [user, setUser] = useState(null);
+      const [fincas, setFincas] = useState([]);
+      const [catalog, setCatalog] = useState([]);
+      const [boardTasks, setBoardTasks] = useState([]);
+      const [historyTasks, setHistoryTasks] = useState([]);
+      const [workers, setWorkers] = useState([]); 
+      const [loading, setLoading] = useState(true);
+      
+      const [dias, setDias] = useState([]);
+      const [newTaskDesc, setNewTaskDesc] = useState('');
+      const [activeFincaForNewTask, setActiveFincaForNewTask] = useState(null);
+      const [reorderingFinca, setReorderingFinca] = useState(null);
+      const [draggedTaskId, setDraggedTaskId] = useState(null);
+      
+      // Modales y menús
+      const [showSettingsModal, setShowSettingsModal] = useState(false);
+      const [settingsTab, setSettingsTab] = useState('fincas'); 
+      const [editingFinca, setEditingFinca] = useState(null);
+      const [newWorkerName, setNewWorkerName] = useState('');
+      const [editingCatalogTask, setEditingCatalogTask] = useState(null);
+      const [touchMenu, setTouchMenu] = useState(null);
+      const [boardTaskMenu, setBoardTaskMenu] = useState(null);
+      const [showWorkersDropdown, setShowWorkersDropdown] = useState(false);
+      const [showCalendarModal, setShowCalendarModal] = useState(false);
+      const [currentMonth, setCurrentMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+      const [selectedCalendarDate, setSelectedCalendarDate] = useState(null);
+      const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(null);
+      const [fbLoaded, setFbLoaded] = useState(!!window.FirebaseAPI);
+
+      const getLocalIsoDate = (date) => {
+        const tzOffset = date.getTimezoneOffset() * 60000;
+        return new Date(date.getTime() - tzOffset).toISOString().split('T')[0];
+      };
+      
+      useEffect(() => {
+        if (window.FirebaseAPI) setFbLoaded(true);
+        else {
+          const handleLoad = () => setFbLoaded(true);
+          window.addEventListener('firebase-modules-loaded', handleLoad);
+          return () => window.removeEventListener('firebase-modules-loaded', handleLoad);
+        }
+      }, []);
+
+      // LÓGICA DE DÍAS RODANTES CON FECHA REAL
+      useEffect(() => {
+        const calculateDates = () => {
+          const today = new Date();
+          let currentDayOfWeek = today.getDay();
+          if (currentDayOfWeek === 0) currentDayOfWeek = 7; 
+
+          const diasBase = [
+            { id: 'L', name: 'Lunes', index: 1 }, { id: 'M', name: 'Martes', index: 2 },
+            { id: 'X', name: 'Miércoles', index: 3 }, { id: 'J', name: 'Jueves', index: 4 },
+            { id: 'V', name: 'Viernes', index: 5 }, { id: 'S', name: 'Sábado', index: 6 },
+            { id: 'D', name: 'Domingo', index: 7 }
+          ];
+
+          const calculatedDias = diasBase.map(dia => {
+            let diffDays = 0;
+            let esProximaSemana = false;
+            let esHoy = false;
+            
+            if (dia.index < currentDayOfWeek) {
+              diffDays = 7 - currentDayOfWeek + dia.index;
+              esProximaSemana = true;
+            } else if (dia.index === currentDayOfWeek) {
+              diffDays = 0;
+              esHoy = true;
+            } else {
+              diffDays = dia.index - currentDayOfWeek;
+            }
+            
+            const targetDate = new Date();
+            targetDate.setDate(today.getDate() + diffDays);
+            const dateString = getLocalIsoDate(targetDate);
+            
+            return { ...dia, numeroDia: targetDate.getDate(), esHoy, esProximaSemana, dateString };
+          });
+          setDias(calculatedDias);
+        };
+
+        calculateDates();
+        const interval = setInterval(calculateDates, 3600000); 
+        return () => clearInterval(interval);
+      }, []);
+
+      useEffect(() => {
+        if (!fbLoaded) return;
+        const initAuth = async () => {
+          try {
+            const { auth, signInAnonymously, onAuthStateChanged } = window.FirebaseAPI;
+            await signInAnonymously(auth);
+            onAuthStateChanged(auth, (currentUser) => {
+              setUser(currentUser);
+              if (!currentUser) setLoading(false);
+            });
+          } catch (e) { console.error("Error Auth:", e); setLoading(false); }
+        };
+        initAuth();
+      }, [fbLoaded]);
+
+      useEffect(() => {
+        if (!user || !window.FirebaseAPI) return;
+        setLoading(true);
+
+        const { db, collection, query, onSnapshot, addDoc } = window.FirebaseAPI;
+        let fincasSeeded = false;
+
+        const unsubFincas = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'fincas')), async (snapshot) => {
+          const items = [];
+          snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+          
+          if (items.length === 0 && !fincasSeeded) {
+            fincasSeeded = true;
+            const defaultFincas = [
+              { name: 'Finca 8', color: COLOR_PALETTE[0].color, handleColor: COLOR_PALETTE[0].handleColor, order: 1 },
+              { name: 'Finca 9', color: COLOR_PALETTE[1].color, handleColor: COLOR_PALETTE[1].handleColor, order: 2 },
+              { name: 'Finca 6', color: COLOR_PALETTE[2].color, handleColor: COLOR_PALETTE[2].handleColor, order: 3 },
+              { name: 'Finca 1y2', color: COLOR_PALETTE[3].color, handleColor: COLOR_PALETTE[3].handleColor, order: 4 },
+              { name: 'Finca 3', color: COLOR_PALETTE[4].color, handleColor: COLOR_PALETTE[4].handleColor, order: 5 },
+            ];
+            for (const df of defaultFincas) {
+              await addDoc(collection(db, 'artifacts', APP_ID, 'fincas'), { ...df, createdAt: Date.now() });
+            }
+          } else {
+            setFincas(items.sort((a, b) => a.order - b.order || a.createdAt - b.createdAt));
+          }
+        });
+
+        const unsubCatalog = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'catalog')), (snapshot) => {
+          const items = [];
+          snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+          setCatalog(items);
+        });
+
+        const unsubHistory = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'history')), (snapshot) => {
+          const items = [];
+          snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+          setHistoryTasks(items);
+        });
+
+        const unsubBoard = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'board')), (snapshot) => {
+          const items = [];
+          snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+          setBoardTasks(items);
+          setLoading(false);
+        });
+
+        const unsubWorkers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'workers')), (snapshot) => {
+          const items = [];
+          snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+          setWorkers(items.sort((a, b) => a.name.localeCompare(b.name)));
+        });
+
+        return () => { unsubFincas(); unsubCatalog(); unsubBoard(); unsubWorkers(); unsubHistory(); };
+      }, [user]);
+
+      // LIMPIEZA / HISTÓRICO BASADO STRICTAMENTE EN EL DÍA ANTERIOR A LAS 00:00
+      useEffect(() => {
+        if (!fbLoaded || !user || boardTasks.length === 0) return;
+        
+        const archivePreviousDayTasks = () => {
+          const today = new Date();
+          let currentDayOfWeek = today.getDay(); // 0 es Domingo
+          if (currentDayOfWeek === 0) currentDayOfWeek = 7;
+          
+          const prevDayOfWeek = currentDayOfWeek === 1 ? 7 : currentDayOfWeek - 1;
+          const diasBase = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+          const prevDayKey = diasBase[prevDayOfWeek - 1];
+          
+          const yesterdayDate = new Date();
+          yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+          const yesterdayStr = getLocalIsoDate(yesterdayDate);
+
+          boardTasks.forEach(t => {
+            // Si la tarea está colocada en la columna del día que ya terminó, archivar
+            if (t.dayId === prevDayKey && t.dateString && t.dateString <= yesterdayStr) {
+              const historyDoc = {
+                 ...t,
+                 archivedAt: Date.now(),
+                 snapshotDate: t.dateString || yesterdayStr,
+                 finalWorkers: t.workerIds || [],
+                 finalNotes: t.notes || '',
+                 finalStars: t.stars || 0
+              };
+              const { db, setDoc, deleteDoc, doc } = window.FirebaseAPI;
+              setDoc(doc(db, 'artifacts', APP_ID, 'history', t.id), historyDoc)
+                .then(() => deleteDoc(doc(db, 'artifacts', APP_ID, 'board', t.id)))
+                .catch(e => console.error("Error archivando día anterior:", e));
+            }
+          });
+        };
+
+        const interval = setInterval(archivePreviousDayTasks, 60000); // Revisa cada minuto
+        return () => clearInterval(interval);
+      }, [boardTasks, user, fbLoaded]);
+
+      // FUNCIONES DE FINCAS
+      const saveFinca = async (e) => {
+        e.preventDefault();
+        if (!user || !editingFinca.name.trim()) return;
+        const { db, collection, addDoc, updateDoc, doc } = window.FirebaseAPI;
+        if (editingFinca.id) {
+          await updateDoc(doc(db, 'artifacts', APP_ID, 'fincas', editingFinca.id), { name: editingFinca.name, color: editingFinca.color, handleColor: editingFinca.handleColor });
+        } else {
+          await addDoc(collection(db, 'artifacts', APP_ID, 'fincas'), { name: editingFinca.name, color: editingFinca.color, handleColor: editingFinca.handleColor, order: fincas.length + 1, createdAt: Date.now() });
+        }
+        setEditingFinca(null);
+      };
+
+      const deleteFinca = async (id) => {
+        if (!user || !window.confirm("¿Seguro que quieres borrar esta finca?")) return;
+        await window.FirebaseAPI.deleteDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'fincas', id));
+      };
+
+      const moveFincaOrder = async (index, direction) => {
+        if (!user) return;
+        if (index + direction < 0 || index + direction >= fincas.length) return;
+        const { db, updateDoc, doc } = window.FirebaseAPI;
+        const current = fincas[index];
+        const swap = fincas[index + direction];
+        
+        await updateDoc(doc(db, 'artifacts', APP_ID, 'fincas', current.id), { order: swap.order || (index + direction + 1) });
+        await updateDoc(doc(db, 'artifacts', APP_ID, 'fincas', swap.id), { order: current.order || (index + 1) });
+      };
+
+      // FUNCIONES DE TRABAJADORES
+      const addWorker = async (e) => {
+        e.preventDefault();
+        if (!user || !newWorkerName.trim()) return;
+        await window.FirebaseAPI.addDoc(window.FirebaseAPI.collection(window.FirebaseAPI.db, 'artifacts', APP_ID, 'workers'), {
+          name: newWorkerName.trim(), createdAt: Date.now()
+        });
+        setNewWorkerName('');
+      };
+
+      const deleteWorker = async (id) => {
+        if (!user) return;
+        await window.FirebaseAPI.deleteDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'workers', id));
+      };
+
+      // FUNCIONES DE TAREAS
+      const addCatalogTask = async (fincaId) => {
+        if (!newTaskDesc.trim() || !user) return;
+        const fincaTasks = catalog.filter(t => t.fincaId === fincaId);
+        const nextNum = fincaTasks.length > 0 ? Math.max(...fincaTasks.map(t => t.number)) + 1 : 1;
+        await window.FirebaseAPI.addDoc(window.FirebaseAPI.collection(window.FirebaseAPI.db, 'artifacts', APP_ID, 'catalog'), {
+          fincaId, number: nextNum, description: newTaskDesc.trim(), createdAt: Date.now()
+        });
+        setNewTaskDesc('');
+        setActiveFincaForNewTask(null);
+      };
+
+      const updateCatalogTask = async (e) => {
+        e.preventDefault();
+        if (!user || !editingCatalogTask) return;
+        await window.FirebaseAPI.updateDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'catalog', editingCatalogTask.id), {
+          description: editingCatalogTask.description
+        });
+        setEditingCatalogTask(null);
+      };
+
+      const moveCatalogTaskOrder = async (fincaId, index, direction) => {
+        if (!user) return;
+        const fincaTasks = catalog.filter(t => t.fincaId === fincaId).sort((a, b) => a.number - b.number);
+        if (index + direction < 0 || index + direction >= fincaTasks.length) return;
+        
+        const current = fincaTasks[index];
+        const swap = fincaTasks[index + direction];
+        
+        const { db, updateDoc, doc } = window.FirebaseAPI;
+        await updateDoc(doc(db, 'artifacts', APP_ID, 'catalog', current.id), { number: swap.number });
+        await updateDoc(doc(db, 'artifacts', APP_ID, 'catalog', swap.id), { number: current.number });
+      };
+
+      const deleteCatalogTask = async (taskId) => {
+        if (!user) return;
+        await window.FirebaseAPI.deleteDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'catalog', taskId));
+      };
+
+      const addBoardTask = async (catalogTask, dia, customOrder = null) => {
+        if (!user) return;
+        await window.FirebaseAPI.addDoc(window.FirebaseAPI.collection(window.FirebaseAPI.db, 'artifacts', APP_ID, 'board'), {
+          catalogTaskId: catalogTask.id, fincaId: catalogTask.fincaId, number: catalogTask.number, 
+          description: catalogTask.description, dayId: dia.id, dateString: dia.dateString, notes: '', workerIds: [], stars: 0, order: customOrder !== null ? customOrder : Date.now(), createdAt: Date.now()
+        });
+      };
+
+      const updateBoardTask = async (taskId, updates) => {
+        if (!user) return;
+        await window.FirebaseAPI.updateDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'board', taskId), updates);
+      };
+
+      const removeBoardTask = async (taskId) => {
+        if (!user) return;
+        await window.FirebaseAPI.deleteDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'board', taskId));
+      };
+
+      const handleDragStart = (e, item, source) => {
+        e.dataTransfer.setData('item', JSON.stringify(item));
+        e.dataTransfer.setData('source', source);
+        if (source === 'board') setDraggedTaskId(item.id);
+      };
+
+      const handleDragEnd = () => {
+        setDraggedTaskId(null);
+      };
+
+      const handleDropOnColumn = (e, dia) => {
+        e.preventDefault();
+        setDraggedTaskId(null);
+        const itemData = e.dataTransfer.getData('item');
+        const source = e.dataTransfer.getData('source');
+        if (!itemData) return;
+        const item = JSON.parse(itemData);
+        if (source === 'catalog') addBoardTask(item, dia);
+        else if (source === 'board' && item.dayId !== dia.id) updateBoardTask(item.id, { dayId: dia.id, dateString: dia.dateString, order: Date.now() });
+      };
+
+      const handleDropOnTask = (e, targetTask, dia) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDraggedTaskId(null);
+        const itemData = e.dataTransfer.getData('item');
+        const source = e.dataTransfer.getData('source');
+        if (!itemData) return;
+        const sourceItem = JSON.parse(itemData);
+        
+        if (sourceItem.id === targetTask.id) return; // Evita error soltar sobre sí misma
+
+        const diaTasks = boardTasks.filter(t => t.dayId === dia.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+        const targetIndex = diaTasks.findIndex(t => t.id === targetTask.id);
+
+        let newOrder;
+        if (targetIndex === 0) {
+           newOrder = (diaTasks[0].order || Date.now()) - 1000;
+        } else {
+           const prevOrder = diaTasks[targetIndex - 1].order || 0;
+           const nextOrder = targetTask.order || Date.now();
+           newOrder = prevOrder + (nextOrder - prevOrder) / 2;
+        }
+
+        if (source === 'catalog') {
+          addBoardTask(sourceItem, dia, newOrder);
+        } else if (source === 'board') {
+          updateBoardTask(sourceItem.id, { dayId: dia.id, dateString: dia.dateString, order: newOrder });
+        }
+      };
+
+      const getFincaData = (fincaId) => fincas.find(f => f.id === fincaId) || { name: '?', color: 'bg-gray-100 border-gray-400', handleColor: 'bg-gray-400' };
+      const getFincaTag = (fincaName) => fincaName.replace(/Finca /i, 'F'); 
+
+      if (loading) return <div className="flex items-center justify-center h-[100dvh] bg-slate-50 font-bold text-slate-500 text-xl">⏳ Cargando Tareas Semanales...</div>;
+
+      return (
+        <div className="flex flex-col h-[100dvh] overflow-hidden bg-slate-50">
+          
+          {/* 1. BLOQUE SUPERIOR (20%) - CABECERA + MINIMAPA */}
+          <div className="h-[20dvh] flex flex-col shrink-0 bg-white shadow-sm z-20 relative border-b">
+            <header className="px-3 py-2 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-800">Tareas Semanales</h1>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowCalendarModal(true)} className="bg-blue-50 hover:bg-blue-100 border border-blue-200 p-1.5 px-2 rounded-lg text-lg flex items-center justify-center text-blue-800 transition-colors shadow-sm" title="Ver Calendario e Historial">
+                  📅
+                </button>
+                <button onClick={() => setShowSettingsModal(true)} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1 text-slate-700 transition-colors">
+                  ⚙️ Ajustes
+                </button>
+              </div>
+            </header>
+
+            <div className="flex-1 flex w-full bg-slate-50/50 px-1 py-1 gap-1 overflow-x-auto items-start">
+              {dias.map(dia => {
+                const tareasDelDia = boardTasks.filter(t => t.dayId === dia.id);
+                return (
+                  <div key={`mini-${dia.id}`} className={`flex-1 min-w-[45px] h-full max-h-full overflow-y-auto border rounded p-1 flex flex-col items-center transition-colors ${dia.esHoy ? 'bg-emerald-50 border-emerald-200 shadow-sm' : 'bg-white border-slate-200'}`}>
+                    <span className={`text-[10px] font-black uppercase sticky top-0 bg-inherit w-full text-center pb-0.5 ${dia.esHoy ? 'text-emerald-700' : 'text-slate-500'}`}>{dia.id}</span>
+                    <div className="flex flex-col gap-0.5 items-center mt-0.5 w-full">
+                      {tareasDelDia.map(t => (
+                        <div key={t.id} title={t.description} className={`w-full text-[9px] font-extrabold flex items-center justify-center rounded-sm shadow-sm text-white py-0.5 px-1 truncate ${getFincaData(t.fincaId).handleColor}`}>
+                          #{t.number}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 2. BLOQUE CENTRAL (40%) - TABLERO KANBAN */}
+          <div className="h-[40dvh] flex-1 overflow-x-auto overflow-y-hidden p-2 flex gap-3 items-start bg-slate-100/50">
+            {dias.map(dia => {
+              const tareasDelDia = boardTasks.filter(t => t.dayId === dia.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+              return (
+                <div key={dia.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDropOnColumn(e, dia)} className="flex-shrink-0 w-64 bg-slate-100/80 border-2 border-dashed border-slate-200 rounded-xl flex flex-col h-full shadow-sm">
+                  
+                  <div className={`border-b border-slate-200 p-1.5 text-center rounded-t-lg sticky top-0 z-10 shadow-sm transition-colors ${dia.esHoy ? 'bg-emerald-100' : 'bg-slate-200/50'}`}>
+                    <span className="font-extrabold text-lg text-slate-800">
+                      {dia.id} <span className={dia.esHoy ? "text-emerald-700" : ""}>{dia.numeroDia}</span>
+                    </span>
+                    <div className="text-[10px] font-medium mt-0.5">
+                      {dia.esHoy ? <span className="text-emerald-700 font-bold bg-white px-2 py-0.5 rounded-full shadow-sm">Hoy {dia.name}</span> : <span className="text-slate-500">{dia.name}</span>}
+                      {dia.esProximaSemana ? <span className="block text-blue-600 font-bold mt-1 bg-blue-50 py-0.5 rounded border border-blue-100">Próxima sem.</span> : ''}
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 p-1.5 space-y-1.5 overflow-y-auto">
+                    {tareasDelDia.map(task => {
+                      const finca = getFincaData(task.fincaId);
+                      const hasNotes = task.notes && task.notes.trim().length > 0;
+                      const taskWorkers = workers.filter(w => (task.workerIds || []).includes(w.id));
+                      const hasStars = task.stars > 0;
+                      const fincaEtiqueta = getFincaTag(finca.name);
+                      const isBeingDragged = draggedTaskId === task.id;
+
+                      return (
+                        <div key={task.id} 
+                          draggable 
+                          onDragStart={(e) => handleDragStart(e, task, 'board')} 
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} 
+                          onDrop={(e) => handleDropOnTask(e, task, dia)}
+                          onClick={() => { setBoardTaskMenu(task); setShowWorkersDropdown(false); }}
+                          className={`flex flex-col bg-white border ${finca.color.split(' ')[1]} rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-all overflow-hidden ${isBeingDragged ? 'opacity-30 scale-95 border-emerald-400' : ''}`}
+                        >
+                          <div className="flex items-stretch min-h-[40px]">
+                            <div className={`w-2 ${finca.handleColor} shrink-0`}></div>
+                            <div className="p-1.5 flex-1 flex flex-col justify-center">
+                               <div className="flex justify-between items-center mb-0.5">
+                                 <div className="flex gap-1 items-center">
+                                   <span className={`text-[9px] font-black px-1 rounded bg-white border shadow-sm text-slate-700 ${finca.color.split(' ')[1]}`}>{fincaEtiqueta}</span>
+                                 </div>
+                                 {hasStars && <span className="text-lg drop-shadow-[0_2px_8px_rgba(251,191,36,1)] scale-125 origin-right transition-transform">{`⭐`.repeat(task.stars)}</span>}
+                               </div>
+                               <span className="text-xs font-semibold text-slate-800 leading-tight">{task.description}</span>
+                            </div>
+                          </div>
+                          
+                          {taskWorkers.length > 0 && (
+                            <div className="bg-blue-50/50 border-t border-blue-100 p-1 px-2 flex flex-wrap gap-1">
+                              {taskWorkers.map(w => (
+                                <span key={w.id} className="text-[9px] font-bold bg-blue-100 text-blue-800 px-1 rounded-full">{w.name}</span>
+                              ))}
+                            </div>
+                          )}
+
+                          {hasNotes && (
+                            <div className="bg-yellow-50/80 border-t border-yellow-100 p-1 px-2 text-[10px] font-medium flex gap-1 items-start text-slate-700">
+                              <span className="mt-0.5 opacity-70">📝</span> <span className="line-clamp-2 leading-tight">{task.notes}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {tareasDelDia.length === 0 && <div className="h-full flex items-center justify-center text-slate-300 text-xs font-medium p-2 border-2 border-dashed border-transparent rounded-lg">Arrastra aquí</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 3. BLOQUE INFERIOR (40%) - CATÁLOGO */}
+          <div className="h-[40dvh] bg-white border-t flex flex-col shrink-0 shadow-[0_-4px_10px_rgb(0,0,0,0.1)] z-20">
+            <div className="p-1.5 bg-slate-800 text-white flex justify-between items-center px-3 shrink-0 shadow-sm">
+              <h2 className="font-bold flex items-center gap-1.5 text-sm">📍 Tareas por fincas <span className="font-normal text-[9px] text-slate-300 hidden sm:inline ml-1 opacity-80">(arrastra o toca la tarea que quieras mover)</span></h2>
+            </div>
+            
+            <div className="flex-1 overflow-x-auto p-2.5 flex gap-3 bg-slate-50/80 items-start">
+              {fincas.map(finca => {
+                const tareasFinca = catalog.filter(t => t.fincaId === finca.id).sort((a, b) => a.number - b.number);
+                const isAdding = activeFincaForNewTask === finca.id;
+                const isReordering = reorderingFinca === finca.id;
+                
+                return (
+                  <div key={finca.id} className={`flex-shrink-0 w-60 rounded-xl border ${finca.color} flex flex-col h-full bg-white shadow-sm overflow-hidden`}>
+                    
+                    <div className={`p-1.5 font-bold text-sm text-center border-b ${finca.color.split(' ')[1]} flex justify-between items-center bg-white/50 backdrop-blur-sm`}>
+                      <span className="drop-shadow-sm ml-1">{finca.name}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => { setReorderingFinca(isReordering ? null : finca.id); setActiveFincaForNewTask(null); }} className={`p-1 w-6 h-6 flex items-center justify-center rounded shadow-sm transition-colors text-slate-700 text-xs ${isReordering ? 'bg-amber-200 hover:bg-amber-300' : 'bg-white/60 hover:bg-white'}`} title="Reordenar Tareas">
+                          {isReordering ? '❌' : '🔃'}
+                        </button>
+                        <button onClick={() => { setActiveFincaForNewTask(isAdding ? null : finca.id); setReorderingFinca(null); }} className={`p-1 w-6 h-6 flex items-center justify-center rounded shadow-sm transition-colors text-slate-700 text-xs ${isAdding ? 'bg-red-200 hover:bg-red-300' : 'bg-white/60 hover:bg-white'}`} title="Añadir Tarea">
+                          {isAdding ? '❌' : '➕'}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {isAdding && (
+                      <div className="p-1.5 border-b bg-slate-50 flex gap-1">
+                        <input type="text" autoFocus placeholder="Añadir tarea..." className="flex-1 text-xs p-1 border rounded outline-none focus:ring-2 focus:ring-emerald-500" value={newTaskDesc} onChange={e => setNewTaskDesc(e.target.value)} onKeyDown={e => e.key === 'Enter' && addCatalogTask(finca.id)} />
+                        <button onClick={() => addCatalogTask(finca.id)} className="bg-emerald-600 text-white px-2 rounded font-bold shadow-sm text-xs">✓</button>
+                      </div>
+                    )}
+                    
+                    <div className="overflow-y-auto p-1.5 space-y-1 flex-1">
+                      {tareasFinca.map((task, index) => (
+                        isReordering ? (
+                          <div key={task.id} className="flex items-center justify-between p-1 bg-amber-50 rounded border border-amber-200 shadow-sm">
+                            <div className="flex items-center gap-1.5 overflow-hidden flex-1">
+                              <span className={`font-bold text-[10px] min-w-[18px] py-0.5 text-center rounded text-white shadow-sm ${finca.handleColor}`}>{task.number}</span>
+                              <span className="text-xs font-medium text-slate-700 truncate select-none">{task.description}</span>
+                            </div>
+                            <div className="flex flex-col border-l border-amber-200 pl-1 ml-1 shrink-0">
+                              <button onClick={() => moveCatalogTaskOrder(finca.id, index, -1)} disabled={index === 0} className="text-slate-400 hover:text-slate-800 disabled:opacity-30 leading-none text-xs p-0.5">⬆️</button>
+                              <button onClick={() => moveCatalogTaskOrder(finca.id, index, 1)} disabled={index === tareasFinca.length - 1} className="text-slate-400 hover:text-slate-800 disabled:opacity-30 leading-none text-xs p-0.5">⬇️</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div key={task.id} draggable onDragStart={(e) => handleDragStart(e, task, 'catalog')} 
+                            className="group flex items-center justify-between p-1 bg-white rounded border shadow-sm cursor-grab active:cursor-grabbing hover:border-slate-400 transition-colors"
+                          >
+                            <div className="flex items-center gap-1.5 overflow-hidden flex-1" onClick={() => setTouchMenu({source: 'catalog', item: task})}>
+                              <span className="text-slate-300 hidden md:block pl-1 cursor-grab text-xs">☰</span>
+                              <span className={`font-bold text-[10px] min-w-[18px] py-0.5 text-center rounded text-white shadow-sm ${finca.handleColor}`}>{task.number}</span>
+                              <span className="text-xs font-medium text-slate-700 truncate select-none">{task.description}</span>
+                            </div>
+                            <div className="flex opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                               <button onClick={() => setEditingCatalogTask(task)} className="text-blue-500 hover:bg-blue-50 p-0.5 rounded text-xs">✏️</button>
+                               <button onClick={() => deleteCatalogTask(task.id)} className="text-red-500 hover:bg-red-50 p-0.5 rounded text-xs">🗑️</button>
+                            </div>
+                          </div>
+                        )
+                      ))}
+                      {tareasFinca.length === 0 && !isAdding && <div className="text-center text-[10px] text-slate-400 p-2 font-medium">Sin tareas. Toca ➕ para crear.</div>}
+                    </div>
+                  </div>
+                );
+              })}
+              {fincas.length === 0 && <div className="p-4 text-slate-500 text-xs font-medium border-2 border-dashed border-slate-300 rounded-xl w-full text-center py-6">Ve a '⚙️ Ajustes' arriba para crear fincas.</div>}
+            </div>
+          </div>
+
+          {/* MODALES Y MENÚS FLOTANTES */}
+          
+          {/* MODAL CALENDARIO E HISTORIAL COMPLETAMENTE RECUPERADO */}
+          {showCalendarModal && (() => {
+            const year = currentMonth.getFullYear();
+            const month = currentMonth.getMonth();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7; 
+            const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+            const blanks = Array.from({ length: firstDayIndex }, (_, i) => i);
+            const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+            return (
+              <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setShowCalendarModal(false); setSelectedCalendarDate(null); }}>
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-sm flex flex-col overflow-hidden max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                  <div className="bg-blue-50 flex justify-between items-center p-3 border-b border-blue-100 shrink-0">
+                    <h2 className="font-bold text-base text-blue-900 flex items-center gap-2">📅 Calendario e Historial</h2>
+                    <button onClick={() => { setShowCalendarModal(false); setSelectedCalendarDate(null); }} className="text-slate-500 text-lg hover:bg-blue-200 rounded-full w-7 h-7 flex items-center justify-center">❌</button>
+                  </div>
+                  <div className="p-4 overflow-y-auto">
+                    <div className="flex justify-between items-center mb-4">
+                      <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} className="p-2 hover:bg-slate-100 rounded-lg font-bold text-slate-600">◀</button>
+                      <div className="font-bold text-lg text-slate-800 capitalize">{monthNames[month]} {year}</div>
+                      <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-2 hover:bg-slate-100 rounded-lg font-bold text-slate-600">▶</button>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-500 mb-2">
+                      <div>L</div><div>M</div><div>X</div><div>J</div><div>V</div><div>S</div><div>D</div>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1 text-center mb-4">
+                      {blanks.map(b => <div key={`blank-${b}`} className="p-2"></div>)}
+                      {days.map(d => {
+                        const dateObj = new Date(year, month, d);
+                        const dateStr = getLocalIsoDate(dateObj);
+                        const isToday = new Date().getDate() === d && new Date().getMonth() === month && new Date().getFullYear() === year;
+                        const isSelected = selectedCalendarDate === dateStr;
+                        const hasTasks = historyTasks.some(t => t.dateString === dateStr) || boardTasks.some(t => t.dateString === dateStr);
+
+                        return (
+                          <div key={d} onClick={() => setSelectedCalendarDate(dateStr)} className={`p-1.5 rounded-lg cursor-pointer text-sm font-semibold flex flex-col items-center justify-center ${isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''} ${isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-700 hover:bg-slate-100'}`}>
+                            <span>{d}</span>
+                            <div className={`w-1.5 h-1.5 rounded-full mt-0.5 ${hasTasks ? (isToday ? 'bg-white' : 'bg-emerald-500') : 'bg-transparent'}`}></div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    
+                    {selectedCalendarDate && (
+                      <div className="border-t pt-3">
+                        <h4 className="font-bold text-sm text-slate-700 mb-2">Tareas del {selectedCalendarDate.split('-').reverse().join('/')}</h4>
+                        <div className="space-y-1.5">
+                          {[...historyTasks, ...boardTasks].filter(t => t.dateString === selectedCalendarDate).map(t => {
+                            const finca = getFincaData(t.fincaId);
+                            const tWorkers = workers.filter(w => (t.workerIds || []).includes(w.id));
+                            return (
+                              <div key={t.id} onClick={() => setShowHistoryDetailModal(t)} className="text-xs p-2 rounded-lg bg-slate-50 hover:bg-blue-50 cursor-pointer border border-slate-200 transition-colors flex flex-col gap-1 shadow-sm">
+                                <div className="flex justify-between items-center">
+                                  <div className="flex gap-1.5 items-center">
+                                    <span className={`w-2.5 h-2.5 rounded-sm shadow-sm shrink-0 ${finca.handleColor}`}></span>
+                                    <span className="font-bold text-slate-800">{finca.name}</span>
+                                  </div>
+                                  {t.stars > 0 && <span>{'⭐'.repeat(t.stars)}</span>}
+                                </div>
+                                <span className="text-slate-700 pl-4 font-semibold">{t.description}</span>
+                                {tWorkers.length > 0 && (
+                                  <span className="text-[10px] text-blue-700 font-bold pl-4">👥 {tWorkers.map(w => w.name).join(', ')}</span>
+                                )}
+                              </div>
+                            )
+                          })}
+                          {[...historyTasks, ...boardTasks].filter(t => t.dateString === selectedCalendarDate).length === 0 && (
+                            <div className="text-xs text-slate-400 italic text-center p-2">No hay tareas registradas este día.</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* VENTANA DETALLE HISTORIAL (VISOR COMPLETO RECUPERADO) */}
+          {showHistoryDetailModal && (() => {
+            const finca = getFincaData(showHistoryDetailModal.fincaId);
+            const taskWorkers = workers.filter(w => (showHistoryDetailModal.workerIds || []).includes(w.id));
+            const hasNotes = showHistoryDetailModal.notes && showHistoryDetailModal.notes.trim().length > 0;
+
+            return (
+              <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setShowHistoryDetailModal(null)}>
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                  
+                  <div className={`p-4 text-white ${finca.handleColor} flex justify-between items-start`}>
+                    <div>
+                      <div className="text-xs font-bold opacity-90 mb-1 tracking-wide uppercase">{finca.name} - {showHistoryDetailModal.dateString ? showHistoryDetailModal.dateString.split('-').reverse().join('/') : ''}</div>
+                      <h3 className="font-black text-xl leading-tight">
+                        {showHistoryDetailModal.description}
+                      </h3>
+                    </div>
+                    <button onClick={() => setShowHistoryDetailModal(null)} className="text-white text-xl bg-black/10 hover:bg-black/20 w-8 h-8 flex items-center justify-center rounded-full transition-colors">❌</button>
+                  </div>
+                  
+                  <div className="p-5 flex flex-col gap-4 bg-slate-50">
+                    
+                    {showHistoryDetailModal.stars > 0 && (
+                      <div className="bg-white p-3 rounded-lg border shadow-sm flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase">Prioridad:</span>
+                        <span className="text-xl drop-shadow-md">{`⭐`.repeat(showHistoryDetailModal.stars)}</span>
+                      </div>
+                    )}
+
+                    <div className="bg-white p-3 rounded-lg border shadow-sm">
+                      <span className="block text-xs font-bold text-slate-400 uppercase mb-2">👥 Cuadrilla Asignada</span>
+                      {taskWorkers.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {taskWorkers.map(w => (
+                            <div key={w.id} className="bg-blue-100 text-blue-800 border border-blue-200 px-2.5 py-1 rounded font-bold text-xs shadow-sm">
+                              {w.name}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">No hubo trabajadores asignados.</span>
+                      )}
+                    </div>
+
+                    {hasNotes && (
+                      <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 shadow-sm">
+                        <span className="block text-xs font-bold text-yellow-700 uppercase mb-1">📝 Anotaciones</span>
+                        <p className="text-xs text-slate-800 whitespace-pre-wrap font-medium">{showHistoryDetailModal.notes}</p>
+                      </div>
+                    )}
+                    
+                  </div>
+                  <div className="p-3 bg-white border-t text-center">
+                    <button onClick={() => setShowHistoryDetailModal(null)} className="w-full py-2 bg-slate-200 text-slate-700 rounded-lg font-bold text-xs hover:bg-slate-300 transition-colors">Cerrar Visor</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* MODAL DE AJUSTES */}
+          {showSettingsModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setShowSettingsModal(false)}>
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-lg flex flex-col max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="bg-slate-50 flex flex-col border-b">
+                  <div className="flex justify-between items-center p-3 pb-2">
+                    <h2 className="font-bold text-base text-slate-800">Ajustes</h2>
+                    <button onClick={() => setShowSettingsModal(false)} className="text-slate-500 text-lg hover:bg-slate-200 rounded-full w-7 h-7 flex items-center justify-center">❌</button>
+                  </div>
+                  <div className="flex px-3 gap-3">
+                    <button onClick={() => setSettingsTab('fincas')} className={`pb-2 font-bold text-xs border-b-2 transition-colors ${settingsTab === 'fincas' ? 'border-emerald-500 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                      ⚙️ Gestión Fincas
+                    </button>
+                    <button onClick={() => setSettingsTab('workers')} className={`pb-2 font-bold text-xs border-b-2 transition-colors ${settingsTab === 'workers' ? 'border-blue-500 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                      👥 Trabajadores
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 overflow-y-auto bg-slate-50/50 flex-1">
+                  {settingsTab === 'fincas' && (
+                    editingFinca ? (
+                      <form onSubmit={saveFinca} className="space-y-3 bg-white p-3 rounded-lg border shadow-sm">
+                        <h3 className="font-bold text-sm text-slate-700">{editingFinca.id ? 'Editar Finca' : 'Nueva Finca'}</h3>
+                        <input type="text" required autoFocus value={editingFinca.name} onChange={e => setEditingFinca({...editingFinca, name: e.target.value})} className="w-full p-2 border rounded text-sm outline-none focus:ring-2 focus:ring-emerald-500" placeholder="Nombre (Ej: Finca Nueva)" />
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Color</label>
+                          <div className="grid grid-cols-4 gap-2">
+                            {COLOR_PALETTE.map((cp, i) => (
+                              <div key={i} onClick={() => setEditingFinca({...editingFinca, color: cp.color, handleColor: cp.handleColor})}
+                                   className={`cursor-pointer h-7 rounded border-2 ${cp.handleColor} ${editingFinca.handleColor === cp.handleColor ? 'ring-2 ring-slate-800 ring-offset-1 scale-105' : 'opacity-70 hover:opacity-100'}`}></div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <button type="button" onClick={() => setEditingFinca(null)} className="flex-1 py-1.5 bg-slate-100 text-sm font-bold rounded text-slate-700">Cancelar</button>
+                          <button type="submit" className="flex-1 py-1.5 bg-emerald-600 text-white text-sm font-bold rounded">Guardar</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="space-y-2">
+                        <button onClick={() => setEditingFinca({ name: '', color: COLOR_PALETTE[0].color, handleColor: COLOR_PALETTE[0].handleColor })} className="w-full py-1.5 bg-white text-emerald-700 border-2 border-emerald-200 border-dashed rounded font-bold text-sm hover:bg-emerald-50 transition-colors">➕ Añadir Nueva Finca</button>
+                        {fincas.map((f, index) => (
+                          <div key={f.id} className={`flex items-center justify-between p-2 border rounded bg-white shadow-sm`}>
+                            <div className="flex items-center gap-2">
+                              <div className={`w-3 h-3 rounded-full ${f.handleColor}`}></div>
+                              <span className="font-bold text-sm text-slate-700">{f.name}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <div className="flex flex-col border-r pr-1 mr-1">
+                                <button onClick={() => moveFincaOrder(index, -1)} disabled={index === 0} className="text-slate-400 hover:text-slate-800 disabled:opacity-30 text-xs">⬆️</button>
+                                <button onClick={() => moveFincaOrder(index, 1)} disabled={index === fincas.length - 1} className="text-slate-400 hover:text-slate-800 disabled:opacity-30 text-xs">⬇️</button>
+                              </div>
+                              <button onClick={() => setEditingFinca(f)} className="p-1 hover:bg-slate-100 rounded text-slate-600 text-xs">✏️</button>
+                              <button onClick={() => deleteFinca(f.id)} className="p-1 hover:bg-red-50 rounded text-red-500 text-xs">🗑️</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  )}
+
+                  {settingsTab === 'workers' && (
+                    <div className="space-y-3">
+                      <form onSubmit={addWorker} className="flex gap-2 bg-white p-2 rounded border shadow-sm">
+                        <input type="text" value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)} placeholder="Nombre..." className="flex-1 p-1.5 text-sm border rounded outline-none focus:ring-2 focus:ring-blue-500" />
+                        <button type="submit" className="bg-blue-600 text-white px-3 text-sm font-bold rounded hover:bg-blue-700">Añadir</button>
+                      </form>
+                      <div className="space-y-1.5">
+                        {workers.map(w => (
+                          <div key={w.id} className="flex justify-between items-center bg-white p-2 border rounded shadow-sm">
+                            <span className="font-semibold text-sm text-slate-700 flex items-center gap-2">👤 {w.name}</span>
+                            <button onClick={() => deleteWorker(w.id)} className="p-1 hover:bg-red-50 text-red-500 rounded text-xs">🗑️</button>
+                          </div>
+                        ))}
+                        {workers.length === 0 && <div className="text-center p-3 text-xs text-slate-400 italic">No hay trabajadores registrados.</div>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL: EDITAR TAREA DEL CATÁLOGO */}
+          {editingCatalogTask && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setEditingCatalogTask(null)}>
+              <form onSubmit={updateCatalogTask} className="bg-white rounded-xl shadow-xl p-4 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                <h3 className="font-bold text-base mb-2 text-slate-800">Editar Tarea</h3>
+                <input type="text" autoFocus required value={editingCatalogTask.description} onChange={e => setEditingCatalogTask({...editingCatalogTask, description: e.target.value})} className="w-full p-2 border rounded mb-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setEditingCatalogTask(null)} className="flex-1 py-1.5 bg-slate-100 rounded text-sm font-bold text-slate-700">Cancelar</button>
+                  <button type="submit" className="flex-1 py-1.5 bg-emerald-600 text-white rounded text-sm font-bold">Guardar</button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* MENÚ TAREA TABLERO */}
+          {boardTaskMenu && (() => {
+            const finca = getFincaData(boardTaskMenu.fincaId);
+            const taskWorkers = workers.filter(w => (boardTaskMenu.workerIds || []).includes(w.id));
+            const workersSummary = taskWorkers.length > 0 ? taskWorkers.map(w => w.name).join(', ') : 'Asignar Trabajadores...';
+
+            return (
+              <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setBoardTaskMenu(null); setShowWorkersDropdown(false); }}>
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[95vh]" onClick={e => e.stopPropagation()}>
+                  
+                  {/* Cabecera sin número (#) */}
+                  <div className={`p-3 rounded-t-xl text-white ${finca.handleColor} flex justify-between items-start`}>
+                    <div>
+                      <div className="text-xs font-bold opacity-90 mb-0.5">{finca.name} - {boardTaskMenu.dayId}</div>
+                      <h3 className="font-black text-lg flex items-center gap-1.5 leading-tight">
+                        <span className="line-clamp-2">{boardTaskMenu.description}</span>
+                      </h3>
+                    </div>
+                    <button onClick={() => { setBoardTaskMenu(null); setShowWorkersDropdown(false); }} className="text-white text-xl hover:bg-black/20 w-7 h-7 flex items-center justify-center rounded-full">❌</button>
+                  </div>
+                  
+                  <div className="p-3 overflow-y-auto flex-1 bg-slate-50/50 flex flex-col gap-3">
+                    
+                    <div className="bg-white p-2 rounded-lg border shadow-sm flex gap-1 justify-center">
+                      {[0, 1, 2, 3].map(num => (
+                        <button key={num} onClick={() => setBoardTaskMenu({...boardTaskMenu, stars: num})} 
+                                className={`flex-1 py-1.5 rounded font-bold transition-all text-2xl drop-shadow-[0_2px_8px_rgba(251,191,36,0.9)] ${boardTaskMenu.stars === num ? 'bg-amber-50 border border-amber-400 text-amber-800 scale-105 shadow-[0_0_10px_rgba(251,191,36,0.5)] ring-1 ring-amber-300' : 'bg-slate-50 border border-transparent text-slate-300 hover:bg-slate-100'}`}>
+                          {num === 0 ? <span className="text-xs font-normal text-slate-500">Normal</span> : '⭐'.repeat(num)}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="relative">
+                      <button onClick={() => setShowWorkersDropdown(!showWorkersDropdown)} className={`w-full text-left p-2 border rounded bg-blue-50 font-bold text-sm flex justify-between items-center shadow-sm ${taskWorkers.length > 0 ? 'text-blue-800 border-blue-200' : 'text-slate-500 border-slate-200'}`}>
+                        <span className="truncate flex-1">👥 {workersSummary}</span>
+                        <span className="shrink-0 ml-2">{showWorkersDropdown ? '▲' : '▼'}</span>
+                      </button>
+                      
+                      {showWorkersDropdown && (
+                        <div className="absolute top-full left-0 w-full bg-white border border-slate-200 shadow-xl rounded-lg mt-1 p-2 grid grid-cols-2 gap-1.5 z-50 max-h-40 overflow-y-auto">
+                          {workers.map(w => {
+                            const isAssignedHere = (boardTaskMenu.workerIds || []).includes(w.id);
+                            
+                            // Buscar si el trabajador está ocupado en OTRA tarea del MISMO DÍA
+                            const otherAssignedTask = boardTasks.find(t => 
+                              t.dayId === boardTaskMenu.dayId && 
+                              t.id !== boardTaskMenu.id && 
+                              (t.workerIds || []).includes(w.id)
+                            );
+                            const otherFinca = otherAssignedTask ? getFincaData(otherAssignedTask.fincaId) : null;
+
+                            return (
+                              <label key={w.id} className={`flex items-center justify-between p-1.5 rounded border transition-colors ${isAssignedHere ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-slate-50 border-slate-100 text-slate-600 cursor-pointer hover:bg-slate-100'}`}>
+                                <div className="flex items-center gap-1.5 overflow-hidden flex-1">
+                                  <input type="checkbox" className="hidden" checked={isAssignedHere} 
+                                    onChange={(e) => {
+                                      const newWorkerIds = e.target.checked 
+                                        ? [...(boardTaskMenu.workerIds || []), w.id] 
+                                        : (boardTaskMenu.workerIds || []).filter(id => id !== w.id);
+                                      setBoardTaskMenu({...boardTaskMenu, workerIds: newWorkerIds});
+                                    }} 
+                                  />
+                                  <div className={`w-4 h-4 rounded-sm border flex items-center justify-center shrink-0 ${isAssignedHere ? 'bg-blue-500 border-blue-500' : 'bg-white'}`}>
+                                    {isAssignedHere && <span className="text-white text-[10px]">✓</span>}
+                                  </div>
+                                  <span className={`text-xs font-semibold truncate ${otherAssignedTask && !isAssignedHere ? 'line-through text-slate-400' : ''}`}>
+                                    {w.name}
+                                  </span>
+                                </div>
+                                
+                                {otherFinca && !isAssignedHere && (
+                                  <span className={`text-[9px] font-black px-1 rounded text-white shadow-sm shrink-0 ml-1 ${otherFinca.handleColor}`}>
+                                    {getFincaTag(otherFinca.name)}
+                                  </span>
+                                )}
+                              </label>
+                            )
+                          })}
+                          {workers.length === 0 && <div className="col-span-2 text-xs text-slate-400 italic text-center p-2">Sin trabajadores en ajustes.</div>}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-white p-2 rounded-lg border shadow-sm">
+                      <textarea value={boardTaskMenu.notes || ''} onChange={(e) => setBoardTaskMenu({...boardTaskMenu, notes: e.target.value})} placeholder="📝 Detalles, maquinaria necesaria..." className="w-full p-2 border border-yellow-200 rounded bg-yellow-50 outline-none focus:ring-1 focus:ring-yellow-400 min-h-[50px] text-xs resize-none" />
+                    </div>
+
+                    <div className="flex gap-2 mt-1">
+                      <button onClick={() => { updateBoardTask(boardTaskMenu.id, { notes: boardTaskMenu.notes, workerIds: boardTaskMenu.workerIds || [], stars: boardTaskMenu.stars || 0 }); setBoardTaskMenu(null); setShowWorkersDropdown(false); }} className="flex-[2] py-2 bg-slate-800 text-white rounded font-bold shadow-md hover:bg-slate-700 text-sm">
+                        💾 Guardar
+                      </button>
+                      <button onClick={() => { removeBoardTask(boardTaskMenu.id); setBoardTaskMenu(null); setShowWorkersDropdown(false); }} className="flex-1 py-2 bg-red-50 text-red-600 border border-red-200 rounded font-bold hover:bg-red-100 text-sm">
+                        🗑️ Quitar
+                      </button>
+                    </div>
+
+                    <div className="border-t border-slate-200 pt-2 flex justify-between items-center gap-2">
+                       <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Mover a:</span>
+                       <div className="flex gap-1 flex-1 overflow-x-auto">
+                        {dias.map(dia => (
+                          <button key={dia.id} onClick={() => { updateBoardTask(boardTaskMenu.id, { dayId: dia.id, dateString: dia.dateString }); setBoardTaskMenu(null); setShowWorkersDropdown(false); }}
+                            className={`flex-1 min-w-[28px] py-1 rounded font-bold text-xs border ${boardTaskMenu.dayId === dia.id ? 'bg-slate-200 text-slate-400' : 'bg-white hover:bg-emerald-100 text-slate-600'}`} disabled={boardTaskMenu.dayId === dia.id}>{dia.id}</button>
+                        ))}
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* MENÚ TÁCTIL CATÁLOGO */}
+          {touchMenu && (() => {
+            const finca = getFincaData(touchMenu.item.fincaId);
+            return (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setTouchMenu(null)}>
+              <div className="bg-white rounded-xl shadow-xl p-4 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-bold text-base text-slate-800">Mover a la pizarra...</h3>
+                  <button onClick={() => setTouchMenu(null)} className="p-1 bg-slate-100 rounded-full w-7 h-7 flex items-center justify-center">❌</button>
+                </div>
+                <div className={`mb-3 p-2 rounded border flex gap-2 items-center ${finca.color.replace('-100', '-50')}`}>
+                  <span className={`font-bold w-6 h-6 flex items-center justify-center rounded text-white text-xs shadow-sm ${finca.handleColor}`}>{touchMenu.item.number}</span>
+                  <span className="font-medium text-sm text-slate-800">{touchMenu.item.description}</span>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {dias.map(dia => (
+                    <button key={dia.id} onClick={() => { addBoardTask(touchMenu.item, dia); setTouchMenu(null); }} className="py-2 bg-slate-50 hover:bg-emerald-100 rounded font-bold text-slate-700 border shadow-sm text-sm">
+                      {dia.id}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )})()}
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
