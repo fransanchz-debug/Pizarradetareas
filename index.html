@@ -221,45 +221,50 @@
         return () => { unsubFincas(); unsubCatalog(); unsubBoard(); unsubWorkers(); unsubHistory(); };
       }, [user]);
 
-      // LIMPIEZA / HISTÓRICO BASADO STRICTAMENTE EN EL DÍA ANTERIOR A LAS 00:00
+      // LÓGICA DE HISTÓRICO Y LIMPIEZA AUTOMÁTICA
+      // 1) Guardar foto de HOY en el histórico si no existe ya
+      // 2) A las 00:00 (o cuando cambie de día), eliminar de 'board' las tareas de días estrictamente pasados (< hoy)
       useEffect(() => {
-        if (!fbLoaded || !user || boardTasks.length === 0) return;
+        if (!fbLoaded || !user || boardTasks.length === 0 || dias.length === 0) return;
         
-        const archivePreviousDayTasks = () => {
-          const today = new Date();
-          let currentDayOfWeek = today.getDay(); // 0 es Domingo
-          if (currentDayOfWeek === 0) currentDayOfWeek = 7;
-          
-          const prevDayOfWeek = currentDayOfWeek === 1 ? 7 : currentDayOfWeek - 1;
-          const diasBase = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-          const prevDayKey = diasBase[prevDayOfWeek - 1];
-          
-          const yesterdayDate = new Date();
-          yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-          const yesterdayStr = getLocalIsoDate(yesterdayDate);
+        const processDailySnapshotsAndCleanup = () => {
+          const todayStr = getLocalIsoDate(new Date());
+          const { db, setDoc, deleteDoc, doc } = window.FirebaseAPI;
 
-          boardTasks.forEach(t => {
-            // Si la tarea está colocada en la columna del día que ya terminó, archivar
-            if (t.dayId === prevDayKey && t.dateString && t.dateString <= yesterdayStr) {
+          // Encontrar el objeto del día de 'HOY' de la vista de la pizarra
+          const hoyObj = dias.find(d => d.esHoy);
+          if (hoyObj) {
+            // Tareas presentes HOY en el tablero
+            const tareasHoy = boardTasks.filter(t => t.dayId === hoyObj.id && t.dateString === hoyObj.dateString);
+            
+            tareasHoy.forEach(t => {
+              // Guardar la foto del día en la colección de histórico
               const historyDoc = {
-                 ...t,
-                 archivedAt: Date.now(),
-                 snapshotDate: t.dateString || yesterdayStr,
-                 finalWorkers: t.workerIds || [],
-                 finalNotes: t.notes || '',
-                 finalStars: t.stars || 0
+                ...t,
+                snapshotDate: hoyObj.dateString,
+                archivedAt: Date.now(),
+                finalWorkers: t.workerIds || [],
+                finalNotes: t.notes || '',
+                finalStars: t.stars || 0
               };
-              const { db, setDoc, deleteDoc, doc } = window.FirebaseAPI;
-              setDoc(doc(db, 'artifacts', APP_ID, 'history', t.id), historyDoc)
-                .then(() => deleteDoc(doc(db, 'artifacts', APP_ID, 'board', t.id)))
-                .catch(e => console.error("Error archivando día anterior:", e));
+              setDoc(doc(db, 'artifacts', APP_ID, 'history', `${hoyObj.dateString}_${t.id}`), historyDoc, { merge: true })
+                .catch(e => console.error("Error guardando foto histórico:", e));
+            });
+          }
+
+          // LIMPIEZA: Eliminar del tablero central (board) las tareas asociadas a días pasados (< todayStr)
+          boardTasks.forEach(t => {
+            if (t.dateString && t.dateString < todayStr) {
+              deleteDoc(doc(db, 'artifacts', APP_ID, 'board', t.id))
+                .catch(e => console.error("Error limpiando tarea pasada:", e));
             }
           });
         };
 
-        const interval = setInterval(archivePreviousDayTasks, 60000); // Revisa cada minuto
+        processDailySnapshotsAndCleanup();
+        const interval = setInterval(processDailySnapshotsAndCleanup, 60000); // Revisa cada minuto
         return () => clearInterval(interval);
-      }, [boardTasks, user, fbLoaded]);
+      }, [boardTasks, dias, user, fbLoaded]);
 
       // FUNCIONES DE FINCAS
       const saveFinca = async (e) => {
@@ -362,6 +367,23 @@
         await window.FirebaseAPI.deleteDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'board', taskId));
       };
 
+      const moveBoardTaskVertically = async (taskId, diaId, direction) => {
+        if (!user) return;
+        const diaTasks = boardTasks.filter(t => t.dayId === diaId).sort((a, b) => (a.order || 0) - (b.order || 0));
+        const index = diaTasks.findIndex(t => t.id === taskId);
+        if (index + direction < 0 || index + direction >= diaTasks.length) return;
+
+        const current = diaTasks[index];
+        const swap = diaTasks[index + direction];
+
+        const { db, updateDoc, doc } = window.FirebaseAPI;
+        const currentOrder = current.order || Date.now();
+        const swapOrder = swap.order || (Date.now() + 100);
+
+        await updateDoc(doc(db, 'artifacts', APP_ID, 'board', current.id), { order: swapOrder });
+        await updateDoc(doc(db, 'artifacts', APP_ID, 'board', swap.id), { order: currentOrder });
+      };
+
       const handleDragStart = (e, item, source) => {
         e.dataTransfer.setData('item', JSON.stringify(item));
         e.dataTransfer.setData('source', source);
@@ -392,7 +414,7 @@
         if (!itemData) return;
         const sourceItem = JSON.parse(itemData);
         
-        if (sourceItem.id === targetTask.id) return; // Evita error soltar sobre sí misma
+        if (sourceItem.id === targetTask.id) return;
 
         const diaTasks = boardTasks.filter(t => t.dayId === dia.id).sort((a, b) => (a.order || 0) - (b.order || 0));
         const targetIndex = diaTasks.findIndex(t => t.id === targetTask.id);
@@ -474,7 +496,7 @@
                   </div>
                   
                   <div className="flex-1 p-1.5 space-y-1.5 overflow-y-auto">
-                    {tareasDelDia.map(task => {
+                    {tareasDelDia.map((task, idx) => {
                       const finca = getFincaData(task.fincaId);
                       const hasNotes = task.notes && task.notes.trim().length > 0;
                       const taskWorkers = workers.filter(w => (task.workerIds || []).includes(w.id));
@@ -489,12 +511,11 @@
                           onDragEnd={handleDragEnd}
                           onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} 
                           onDrop={(e) => handleDropOnTask(e, task, dia)}
-                          onClick={() => { setBoardTaskMenu(task); setShowWorkersDropdown(false); }}
-                          className={`flex flex-col bg-white border ${finca.color.split(' ')[1]} rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-all overflow-hidden ${isBeingDragged ? 'opacity-30 scale-95 border-emerald-400' : ''}`}
+                          className={`flex flex-col bg-white border ${finca.color.split(' ')[1]} rounded-lg shadow-sm hover:shadow-md transition-all overflow-hidden ${isBeingDragged ? 'opacity-30 scale-95 border-emerald-400' : ''}`}
                         >
                           <div className="flex items-stretch min-h-[40px]">
-                            <div className={`w-2 ${finca.handleColor} shrink-0`}></div>
-                            <div className="p-1.5 flex-1 flex flex-col justify-center">
+                            <div className={`w-2 ${finca.handleColor} shrink-0 cursor-grab active:cursor-grabbing`}></div>
+                            <div className="p-1.5 flex-1 flex flex-col justify-center cursor-pointer" onClick={() => { setBoardTaskMenu(task); setShowWorkersDropdown(false); }}>
                                <div className="flex justify-between items-center mb-0.5">
                                  <div className="flex gap-1 items-center">
                                    <span className={`text-[9px] font-black px-1 rounded bg-white border shadow-sm text-slate-700 ${finca.color.split(' ')[1]}`}>{fincaEtiqueta}</span>
@@ -503,10 +524,15 @@
                                </div>
                                <span className="text-xs font-semibold text-slate-800 leading-tight">{task.description}</span>
                             </div>
+
+                            <div className="flex flex-col justify-center border-l border-slate-100 px-1 bg-slate-50/50 shrink-0">
+                              <button onClick={(e) => { e.stopPropagation(); moveBoardTaskVertically(task.id, dia.id, -1); }} disabled={idx === 0} className="text-slate-400 hover:text-slate-800 disabled:opacity-20 text-[10px] leading-none p-0.5">▲</button>
+                              <button onClick={(e) => { e.stopPropagation(); moveBoardTaskVertically(task.id, dia.id, 1); }} disabled={idx === tareasDelDia.length - 1} className="text-slate-400 hover:text-slate-800 disabled:opacity-20 text-[10px] leading-none p-0.5">▼</button>
+                            </div>
                           </div>
                           
                           {taskWorkers.length > 0 && (
-                            <div className="bg-blue-50/50 border-t border-blue-100 p-1 px-2 flex flex-wrap gap-1">
+                            <div className="bg-blue-50/50 border-t border-blue-100 p-1 px-2 flex flex-wrap gap-1 cursor-pointer" onClick={() => { setBoardTaskMenu(task); setShowWorkersDropdown(false); }}>
                               {taskWorkers.map(w => (
                                 <span key={w.id} className="text-[9px] font-bold bg-blue-100 text-blue-800 px-1 rounded-full">{w.name}</span>
                               ))}
@@ -514,7 +540,7 @@
                           )}
 
                           {hasNotes && (
-                            <div className="bg-yellow-50/80 border-t border-yellow-100 p-1 px-2 text-[10px] font-medium flex gap-1 items-start text-slate-700">
+                            <div className="bg-yellow-50/80 border-t border-yellow-100 p-1 px-2 text-[10px] font-medium flex gap-1 items-start text-slate-700 cursor-pointer" onClick={() => { setBoardTaskMenu(task); setShowWorkersDropdown(false); }}>
                               <span className="mt-0.5 opacity-70">📝</span> <span className="line-clamp-2 leading-tight">{task.notes}</span>
                             </div>
                           )}
@@ -602,7 +628,7 @@
 
           {/* MODALES Y MENÚS FLOTANTES */}
           
-          {/* MODAL CALENDARIO E HISTORIAL COMPLETAMENTE RECUPERADO */}
+          {/* MODAL CALENDARIO E HISTÓRICO STRICTO (MUESTRA SOLO FOTOS PASADAS/HOY) */}
           {showCalendarModal && (() => {
             const year = currentMonth.getFullYear();
             const month = currentMonth.getMonth();
@@ -611,12 +637,13 @@
             const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
             const blanks = Array.from({ length: firstDayIndex }, (_, i) => i);
             const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+            const todayStr = getLocalIsoDate(new Date());
 
             return (
               <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setShowCalendarModal(false); setSelectedCalendarDate(null); }}>
                 <div className="bg-white rounded-xl shadow-xl w-full max-w-sm flex flex-col overflow-hidden max-h-[90vh]" onClick={e => e.stopPropagation()}>
                   <div className="bg-blue-50 flex justify-between items-center p-3 border-b border-blue-100 shrink-0">
-                    <h2 className="font-bold text-base text-blue-900 flex items-center gap-2">📅 Calendario e Historial</h2>
+                    <h2 className="font-bold text-base text-blue-900 flex items-center gap-2">📅 Histórico de Días Pasados</h2>
                     <button onClick={() => { setShowCalendarModal(false); setSelectedCalendarDate(null); }} className="text-slate-500 text-lg hover:bg-blue-200 rounded-full w-7 h-7 flex items-center justify-center">❌</button>
                   </div>
                   <div className="p-4 overflow-y-auto">
@@ -633,14 +660,18 @@
                       {days.map(d => {
                         const dateObj = new Date(year, month, d);
                         const dateStr = getLocalIsoDate(dateObj);
-                        const isToday = new Date().getDate() === d && new Date().getMonth() === month && new Date().getFullYear() === year;
+                        const isToday = todayStr === dateStr;
+                        const isFuture = dateStr > todayStr;
                         const isSelected = selectedCalendarDate === dateStr;
-                        const hasTasks = historyTasks.some(t => t.dateString === dateStr) || boardTasks.some(t => t.dateString === dateStr);
+                        
+                        // Solo mostramos tareas del histórico de días pasados o de la foto de hoy
+                        const hasSnapshot = historyTasks.some(t => t.snapshotDate === dateStr);
 
                         return (
-                          <div key={d} onClick={() => setSelectedCalendarDate(dateStr)} className={`p-1.5 rounded-lg cursor-pointer text-sm font-semibold flex flex-col items-center justify-center ${isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''} ${isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-700 hover:bg-slate-100'}`}>
+                          <div key={d} onClick={() => !isFuture && setSelectedCalendarDate(dateStr)} 
+                               className={`p-1.5 rounded-lg text-sm font-semibold flex flex-col items-center justify-center transition-all ${isFuture ? 'opacity-30 cursor-not-allowed text-slate-300' : 'cursor-pointer hover:bg-slate-100 text-slate-700'} ${isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''} ${isToday ? 'bg-blue-600 text-white shadow-md' : ''}`}>
                             <span>{d}</span>
-                            <div className={`w-1.5 h-1.5 rounded-full mt-0.5 ${hasTasks ? (isToday ? 'bg-white' : 'bg-emerald-500') : 'bg-transparent'}`}></div>
+                            <div className={`w-1.5 h-1.5 rounded-full mt-0.5 ${hasSnapshot ? (isToday ? 'bg-white' : 'bg-emerald-500') : 'bg-transparent'}`}></div>
                           </div>
                         )
                       })}
@@ -648,9 +679,9 @@
                     
                     {selectedCalendarDate && (
                       <div className="border-t pt-3">
-                        <h4 className="font-bold text-sm text-slate-700 mb-2">Tareas del {selectedCalendarDate.split('-').reverse().join('/')}</h4>
+                        <h4 className="font-bold text-sm text-slate-700 mb-2">Fotos de tareas del {selectedCalendarDate.split('-').reverse().join('/')}</h4>
                         <div className="space-y-1.5">
-                          {[...historyTasks, ...boardTasks].filter(t => t.dateString === selectedCalendarDate).map(t => {
+                          {historyTasks.filter(t => t.snapshotDate === selectedCalendarDate).map(t => {
                             const finca = getFincaData(t.fincaId);
                             const tWorkers = workers.filter(w => (t.workerIds || []).includes(w.id));
                             return (
@@ -669,8 +700,8 @@
                               </div>
                             )
                           })}
-                          {[...historyTasks, ...boardTasks].filter(t => t.dateString === selectedCalendarDate).length === 0 && (
-                            <div className="text-xs text-slate-400 italic text-center p-2">No hay tareas registradas este día.</div>
+                          {historyTasks.filter(t => t.snapshotDate === selectedCalendarDate).length === 0 && (
+                            <div className="text-xs text-slate-400 italic text-center p-2">No hay foto archivada para este día.</div>
                           )}
                         </div>
                       </div>
@@ -681,7 +712,7 @@
             );
           })()}
 
-          {/* VENTANA DETALLE HISTORIAL (VISOR COMPLETO RECUPERADO) */}
+          {/* VENTANA DETALLE HISTORIAL */}
           {showHistoryDetailModal && (() => {
             const finca = getFincaData(showHistoryDetailModal.fincaId);
             const taskWorkers = workers.filter(w => (showHistoryDetailModal.workerIds || []).includes(w.id));
@@ -693,7 +724,7 @@
                   
                   <div className={`p-4 text-white ${finca.handleColor} flex justify-between items-start`}>
                     <div>
-                      <div className="text-xs font-bold opacity-90 mb-1 tracking-wide uppercase">{finca.name} - {showHistoryDetailModal.dateString ? showHistoryDetailModal.dateString.split('-').reverse().join('/') : ''}</div>
+                      <div className="text-xs font-bold opacity-90 mb-1 tracking-wide uppercase">{finca.name} - {showHistoryDetailModal.snapshotDate ? showHistoryDetailModal.snapshotDate.split('-').reverse().join('/') : ''}</div>
                       <h3 className="font-black text-xl leading-tight">
                         {showHistoryDetailModal.description}
                       </h3>
@@ -882,7 +913,6 @@
                           {workers.map(w => {
                             const isAssignedHere = (boardTaskMenu.workerIds || []).includes(w.id);
                             
-                            // Buscar si el trabajador está ocupado en OTRA tarea del MISMO DÍA
                             const otherAssignedTask = boardTasks.find(t => 
                               t.dayId === boardTaskMenu.dayId && 
                               t.id !== boardTaskMenu.id && 
