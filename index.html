@@ -917,54 +917,51 @@
                       ))}
                     </div>
 
-                    <div className="relative">
-                      <button onClick={() => setShowWorkersDropdown(!showWorkersDropdown)} className={`w-full text-left p-2 border rounded bg-blue-50 font-bold text-sm flex justify-between items-center shadow-sm ${taskWorkers.length > 0 ? 'text-blue-800 border-blue-200' : 'text-slate-500 border-slate-200'}`}>
-                        <span className="truncate flex-1">👥 {workersSummary}</span>
-                        <span className="shrink-0 ml-2">{showWorkersDropdown ? '▲' : '▼'}</span>
-                      </button>
-                      
-                      {showWorkersDropdown && (
-                        <div className="absolute top-full left-0 w-full bg-white border border-slate-200 shadow-xl rounded-lg mt-1 p-2 grid grid-cols-2 gap-1.5 z-50 max-h-40 overflow-y-auto">
-                          {workers.map(w => {
-                            const isAssignedHere = (boardTaskMenu.workerIds || []).includes(w.id);
-                            
-                            const otherAssignedTask = boardTasks.find(t => 
-                              t.dayId === boardTaskMenu.dayId && 
-                              t.id !== boardTaskMenu.id && 
-                              (t.workerIds || []).includes(w.id)
-                            );
-                            const otherFinca = otherAssignedTask ? getFincaData(otherAssignedTask.fincaId) : null;
+                    <div className="bg-white p-2.5 rounded-lg border shadow-sm flex flex-col gap-1.5">
+                      <span className="text-xs font-bold text-slate-500 uppercase flex items-center justify-between">
+                        <span>👥 Cuadrilla Asignada</span>
+                        <span className="text-[10px] font-normal text-slate-400">(Toca para marcar)</span>
+                      </span>
+                      <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1">
+                        {workers.map(w => {
+                          const isAssignedHere = (boardTaskMenu.workerIds || []).includes(w.id);
+                          
+                          const otherAssignedTask = boardTasks.find(t => 
+                            t.dayId === boardTaskMenu.dayId && 
+                            t.id !== boardTaskMenu.id && 
+                            (t.workerIds || []).includes(w.id)
+                          );
+                          const otherFinca = otherAssignedTask ? getFincaData(otherAssignedTask.fincaId) : null;
 
-                            return (
-                              <label key={w.id} className={`flex items-center justify-between p-1.5 rounded border transition-colors ${isAssignedHere ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-slate-50 border-slate-100 text-slate-600 cursor-pointer hover:bg-slate-100'}`}>
-                                <div className="flex items-center gap-1.5 overflow-hidden flex-1">
-                                  <input type="checkbox" className="hidden" checked={isAssignedHere} 
-                                    onChange={(e) => {
-                                      const newWorkerIds = e.target.checked 
-                                        ? [...(boardTaskMenu.workerIds || []), w.id] 
-                                        : (boardTaskMenu.workerIds || []).filter(id => id !== w.id);
-                                      setBoardTaskMenu({...boardTaskMenu, workerIds: newWorkerIds});
-                                    }} 
-                                  />
-                                  <div className={`w-4 h-4 rounded-sm border flex items-center justify-center shrink-0 ${isAssignedHere ? 'bg-blue-500 border-blue-500' : 'bg-white'}`}>
-                                    {isAssignedHere && <span className="text-white text-[10px]">✓</span>}
-                                  </div>
-                                  <span className={`text-xs font-semibold truncate ${otherAssignedTask && !isAssignedHere ? 'line-through text-slate-400' : ''}`}>
-                                    {w.name}
-                                  </span>
+                          return (
+                            <label key={w.id} className={`flex items-center justify-between p-1.5 rounded border transition-colors ${isAssignedHere ? 'bg-blue-50 border-blue-300 text-blue-800' : 'bg-slate-50 border-slate-100 text-slate-600 cursor-pointer hover:bg-slate-100'}`}>
+                              <div className="flex items-center gap-1.5 overflow-hidden flex-1">
+                                <input type="checkbox" className="hidden" checked={isAssignedHere} 
+                                  onChange={(e) => {
+                                    const newWorkerIds = e.target.checked 
+                                      ? [...(boardTaskMenu.workerIds || []), w.id] 
+                                      : (boardTaskMenu.workerIds || []).filter(id => id !== w.id);
+                                    setBoardTaskMenu({...boardTaskMenu, workerIds: newWorkerIds});
+                                  }} 
+                                />
+                                <div className={`w-4 h-4 rounded-sm border flex items-center justify-center shrink-0 ${isAssignedHere ? 'bg-blue-500 border-blue-500' : 'bg-white'}`}>
+                                  {isAssignedHere && <span className="text-white text-[10px]">✓</span>}
                                 </div>
-                                
-                                {otherFinca && !isAssignedHere && (
-                                  <span className={`text-[9px] font-black px-1 rounded text-white shadow-sm shrink-0 ml-1 ${otherFinca.handleColor}`}>
-                                    {getFincaTag(otherFinca.name)}
-                                  </span>
-                                )}
-                              </label>
-                            )
-                          })}
-                          {workers.length === 0 && <div className="col-span-2 text-xs text-slate-400 italic text-center p-2">Sin trabajadores en ajustes.</div>}
-                        </div>
-                      )}
+                                <span className={`text-xs font-semibold truncate ${otherAssignedTask && !isAssignedHere ? 'line-through text-slate-400' : ''}`}>
+                                  {w.name}
+                                </span>
+                              </div>
+                              
+                              {otherFinca && !isAssignedHere && (
+                                <span className={`text-[9px] font-black px-1 rounded text-white shadow-sm shrink-0 ml-1 ${otherFinca.handleColor}`}>
+                                  {getFincaTag(otherFinca.name)}
+                                </span>
+                              )}
+                            </label>
+                          )
+                        })}
+                        {workers.length === 0 && <div className="col-span-2 text-xs text-slate-400 italic text-center p-2">Sin trabajadores en ajustes.</div>}
+                      </div>
                     </div>
 
                     <div className="bg-white p-2 rounded-lg border shadow-sm">
