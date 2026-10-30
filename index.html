@@ -86,8 +86,10 @@
       const [fbLoaded, setFbLoaded] = useState(!!window.FirebaseAPI);
 
       const getLocalIsoDate = (date) => {
-        const tzOffset = date.getTimezoneOffset() * 60000;
-        return new Date(date.getTime() - tzOffset).toISOString().split('T')[0];
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
       };
       
       useEffect(() => {
@@ -670,7 +672,10 @@
                         </div>
                         <div className="space-y-1.5">
                           {(selectedCalendarDate === todayStr 
-                              ? boardTasks.filter(t => t.dateString === selectedCalendarDate).map(t => ({...t, snapshotDate: todayStr}))
+                              ? boardTasks.filter(t => {
+                                  const currentDayObj = dias.find(d => d.esHoy);
+                                  return t.dayId === (currentDayObj ? currentDayObj.id : null) || t.dateString === todayStr;
+                                }).map(t => ({...t, snapshotDate: todayStr}))
                               : historyTasks.filter(t => t.snapshotDate === selectedCalendarDate)
                           ).map(t => {
                             const finca = getFincaData(t.fincaId);
@@ -692,7 +697,10 @@
                             )
                           })}
                           {(selectedCalendarDate === todayStr 
-                              ? boardTasks.filter(t => t.dateString === selectedCalendarDate)
+                              ? boardTasks.filter(t => {
+                                  const currentDayObj = dias.find(d => d.esHoy);
+                                  return t.dayId === (currentDayObj ? currentDayObj.id : null) || t.dateString === todayStr;
+                                })
                               : historyTasks.filter(t => t.snapshotDate === selectedCalendarDate)
                           ).length === 0 && (
                             <div className="text-xs text-slate-400 italic text-center p-2">{selectedCalendarDate === todayStr ? "No hay tareas programadas para hoy." : "No hay foto archivada para este día."}</div>
