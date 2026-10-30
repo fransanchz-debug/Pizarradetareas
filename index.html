@@ -224,39 +224,41 @@
       useEffect(() => {
         if (!fbLoaded || !user || dias.length === 0) return;
         
-        const processDailySnapshotsAndCleanup = () => {
+        const processDailySnapshotsAndCleanup = async () => {
           const todayStr = getLocalIsoDate(new Date());
           const { db, setDoc, deleteDoc, doc } = window.FirebaseAPI;
 
           // LIMPIEZA AUTO DE SEGURIDAD: Borrar del histórico cualquier foto que pertenezca a HOY o a días futuros
-          historyTasks.forEach(ht => {
+          for (const ht of historyTasks) {
             if (ht.snapshotDate && ht.snapshotDate >= todayStr) {
-              deleteDoc(doc(db, 'artifacts', APP_ID, 'history', ht.id))
-                .catch(e => console.error("Error purgando foto prematura de hoy:", e));
+              try { await deleteDoc(doc(db, 'artifacts', APP_ID, 'history', ht.id)); } 
+              catch(e) { console.error(e); }
             }
-          });
+          }
 
           // PROCESAR FOTOS DE DÍAS QUE YA HAN PASADO (< todayStr)
-          boardTasks.forEach(t => {
-            if (t.dateString && t.dateString < todayStr) {
-              
+          for (const t of boardTasks) {
+            const checkDate = t.targetDateStr || t.dateString;
+            if (checkDate && checkDate < todayStr) {
               const historyDoc = {
                 ...t,
-                snapshotDate: t.dateString,
+                snapshotDate: checkDate,
                 archivedAt: Date.now(),
                 finalWorkers: t.workerIds || [],
                 finalNotes: t.notes || '',
                 finalStars: t.stars || 0
               };
               
-              setDoc(doc(db, 'artifacts', APP_ID, 'history', `${t.dateString}_${t.id}`), historyDoc, { merge: true })
-                .then(() => {
-                   deleteDoc(doc(db, 'artifacts', APP_ID, 'board', t.id))
-                     .catch(e => console.error("Error limpiando tarea pasada:", e));
-                })
-                .catch(e => console.error("Error guardando foto histórico:", e));
+              try {
+                // Forzar primero el borrado en la pizarra principal, que es lo más crítico para el usuario
+                await deleteDoc(doc(db, 'artifacts', APP_ID, 'board', t.id));
+                // Luego aseguramos que se guarda/actualiza en el histórico
+                await setDoc(doc(db, 'artifacts', APP_ID, 'history', `${checkDate}_${t.id}`), historyDoc, { merge: true });
+              } catch (e) {
+                console.error("Error archivando/limpiando tarea pasada:", e);
+              }
             }
-          });
+          }
         };
 
         processDailySnapshotsAndCleanup();
@@ -354,7 +356,7 @@
         if (!user) return;
         await window.FirebaseAPI.addDoc(window.FirebaseAPI.collection(window.FirebaseAPI.db, 'artifacts', APP_ID, 'board'), {
           catalogTaskId: catalogTask.id, fincaId: catalogTask.fincaId, number: catalogTask.number, 
-          description: catalogTask.description, dayId: dia.id, dateString: dia.dateString, notes: '', workerIds: [], stars: 0, order: customOrder !== null ? customOrder : Date.now(), createdAt: Date.now()
+          description: catalogTask.description, dayId: dia.id, dateString: dia.dateString, targetDateStr: dia.dateString, notes: '', workerIds: [], stars: 0, order: customOrder !== null ? customOrder : Date.now(), createdAt: Date.now()
         });
       };
 
@@ -403,7 +405,7 @@
         if (!itemData) return;
         const item = JSON.parse(itemData);
         if (source === 'catalog') addBoardTask(item, dia);
-        else if (source === 'board' && item.dayId !== dia.id) updateBoardTask(item.id, { dayId: dia.id, dateString: dia.dateString, order: Date.now() });
+        else if (source === 'board' && item.dayId !== dia.id) updateBoardTask(item.id, { dayId: dia.id, dateString: dia.dateString, targetDateStr: dia.dateString, order: Date.now() });
       };
 
       const handleDropOnTask = (e, targetTask, dia) => {
@@ -572,13 +574,9 @@
                 return (
                   <div key={finca.id} className={`flex-shrink-0 w-60 rounded-xl border ${finca.color} flex flex-col h-full bg-white shadow-sm overflow-hidden`}>
                     
-                    <div className={`p-1.5 font-bold text-sm border-b ${finca.color.split(' ')[1]} flex justify-between items-center bg-white/50 backdrop-blur-sm`}>
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => moveFincaOrder(fincas.findIndex(f => f.id === finca.id), -1)} disabled={fincas.findIndex(f => f.id === finca.id) === 0} className="w-6 h-6 bg-white/80 hover:bg-white disabled:opacity-20 rounded text-slate-700 text-xs font-black shadow-sm flex items-center justify-center">◀</button>
-                        <span className="drop-shadow-sm font-extrabold text-slate-800 text-xs sm:text-sm px-1">{finca.name}</span>
-                        <button onClick={() => moveFincaOrder(fincas.findIndex(f => f.id === finca.id), 1)} disabled={fincas.findIndex(f => f.id === finca.id) === fincas.length - 1} className="w-6 h-6 bg-white/80 hover:bg-white disabled:opacity-20 rounded text-slate-700 text-xs font-black shadow-sm flex items-center justify-center">▶</button>
-                      </div>
-                      <div className="flex gap-1 items-center">
+                    <div className={`p-1.5 font-bold text-sm text-center border-b ${finca.color.split(' ')[1]} flex justify-between items-center bg-white/50 backdrop-blur-sm`}>
+                      <span className="drop-shadow-sm ml-1">{finca.name}</span>
+                      <div className="flex gap-1">
                         <button onClick={() => { setReorderingFinca(isReordering ? null : finca.id); setActiveFincaForNewTask(null); }} className={`p-1 w-6 h-6 flex items-center justify-center rounded shadow-sm transition-colors text-slate-700 text-xs ${isReordering ? 'bg-amber-200 hover:bg-amber-300' : 'bg-white/60 hover:bg-white'}`} title="Reordenar Tareas">
                           {isReordering ? '❌' : '🔃'}
                         </button>
@@ -986,7 +984,7 @@
                        <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Mover a:</span>
                        <div className="flex gap-1 flex-1 overflow-x-auto">
                         {dias.map(dia => (
-                          <button key={dia.id} onClick={() => { updateBoardTask(boardTaskMenu.id, { dayId: dia.id, dateString: dia.dateString }); setBoardTaskMenu(null); setShowWorkersDropdown(false); }}
+                          <button key={dia.id} onClick={() => { updateBoardTask(boardTaskMenu.id, { dayId: dia.id, dateString: dia.dateString, targetDateStr: dia.dateString }); setBoardTaskMenu(null); setShowWorkersDropdown(false); }}
                             className={`flex-1 min-w-[28px] py-1 rounded font-bold text-xs border ${boardTaskMenu.dayId === dia.id ? 'bg-slate-200 text-slate-400' : 'bg-white hover:bg-emerald-100 text-slate-600'}`} disabled={boardTaskMenu.dayId === dia.id}>{dia.id}</button>
                         ))}
                        </div>
