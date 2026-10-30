@@ -166,10 +166,10 @@
         let fincasSeeded = false;
 
         const unsubFincas = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'fincas')), async (snapshot) => {
-          const items = [];
-          snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+          const rawItems = [];
+          snapshot.forEach(doc => rawItems.push({ ...doc.data(), id: doc.id }));
           
-          if (items.length === 0 && !fincasSeeded) {
+          if (rawItems.length === 0 && !fincasSeeded) {
             fincasSeeded = true;
             const defaultFincas = [
               { name: 'Finca 8', color: COLOR_PALETTE[0].color, handleColor: COLOR_PALETTE[0].handleColor, order: 1 },
@@ -182,7 +182,13 @@
               await addDoc(collection(db, 'artifacts', APP_ID, 'fincas'), { ...df, createdAt: Date.now() });
             }
           } else {
-            setFincas(items.sort((a, b) => a.order - b.order || a.createdAt - b.createdAt));
+            // Deduplicar por id y por nombre si fuera necesario
+            const uniqueMap = new Map();
+            rawItems.forEach(item => {
+              if (!uniqueMap.has(item.id)) uniqueMap.set(item.id, item);
+            });
+            const items = Array.from(uniqueMap.values());
+            setFincas(items.sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0)));
           }
         });
 
@@ -276,14 +282,20 @@
       };
 
       const moveFincaOrder = async (index, direction) => {
-        if (!user) return;
-        if (index + direction < 0 || index + direction >= fincas.length) return;
+        if (!user || index + direction < 0 || index + direction >= fincas.length) return;
         const { db, updateDoc, doc } = window.FirebaseAPI;
-        const current = fincas[index];
-        const swap = fincas[index + direction];
         
-        await updateDoc(doc(db, 'artifacts', APP_ID, 'fincas', current.id), { order: swap.order || (index + direction + 1) });
-        await updateDoc(doc(db, 'artifacts', APP_ID, 'fincas', swap.id), { order: current.order || (index + 1) });
+        // Clonamos y reordenamos el array local primero
+        const newFincas = [...fincas];
+        const targetIndex = index + direction;
+        const [moved] = newFincas.splice(index, 1);
+        newFincas.splice(targetIndex, 0, moved);
+
+        // Asignamos una secuencia limpia y robusta (1, 2, 3...) a cada finca en Firestore
+        const updates = newFincas.map((f, i) => 
+          updateDoc(doc(db, 'artifacts', APP_ID, 'fincas', f.id), { order: i + 1 })
+        );
+        await Promise.all(updates);
       };
 
       const addWorker = async (e) => {
@@ -560,9 +572,13 @@
                 return (
                   <div key={finca.id} className={`flex-shrink-0 w-60 rounded-xl border ${finca.color} flex flex-col h-full bg-white shadow-sm overflow-hidden`}>
                     
-                    <div className={`p-1.5 font-bold text-sm text-center border-b ${finca.color.split(' ')[1]} flex justify-between items-center bg-white/50 backdrop-blur-sm`}>
-                      <span className="drop-shadow-sm ml-1">{finca.name}</span>
-                      <div className="flex gap-1">
+                    <div className={`p-1.5 font-bold text-sm border-b ${finca.color.split(' ')[1]} flex justify-between items-center bg-white/50 backdrop-blur-sm`}>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => moveFincaOrder(fincas.findIndex(f => f.id === finca.id), -1)} disabled={fincas.findIndex(f => f.id === finca.id) === 0} className="w-6 h-6 bg-white/80 hover:bg-white disabled:opacity-20 rounded text-slate-700 text-xs font-black shadow-sm flex items-center justify-center">◀</button>
+                        <span className="drop-shadow-sm font-extrabold text-slate-800 text-xs sm:text-sm px-1">{finca.name}</span>
+                        <button onClick={() => moveFincaOrder(fincas.findIndex(f => f.id === finca.id), 1)} disabled={fincas.findIndex(f => f.id === finca.id) === fincas.length - 1} className="w-6 h-6 bg-white/80 hover:bg-white disabled:opacity-20 rounded text-slate-700 text-xs font-black shadow-sm flex items-center justify-center">▶</button>
+                      </div>
+                      <div className="flex gap-1 items-center">
                         <button onClick={() => { setReorderingFinca(isReordering ? null : finca.id); setActiveFincaForNewTask(null); }} className={`p-1 w-6 h-6 flex items-center justify-center rounded shadow-sm transition-colors text-slate-700 text-xs ${isReordering ? 'bg-amber-200 hover:bg-amber-300' : 'bg-white/60 hover:bg-white'}`} title="Reordenar Tareas">
                           {isReordering ? '❌' : '🔃'}
                         </button>
