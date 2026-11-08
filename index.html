@@ -83,7 +83,12 @@
       const [currentMonth, setCurrentMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
       const [selectedCalendarDate, setSelectedCalendarDate] = useState(null);
       const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(null);
+      const [historyViewMode, setHistoryViewMode] = useState('calendar'); // 'calendar' o 'search'
+      const [historySearchText, setHistorySearchText] = useState('');
+      const [historySearchFincaId, setHistorySearchFincaId] = useState('ALL');
+      const [historySearchWorkerId, setHistorySearchWorkerId] = useState('ALL');
       const [fbLoaded, setFbLoaded] = useState(!!window.FirebaseAPI);
+      const kanbanScrollRef = useRef(null);
 
       const getLocalIsoDate = (date) => {
         const y = date.getFullYear();
@@ -142,6 +147,22 @@
         const interval = setInterval(calculateDates, 3600000); 
         return () => clearInterval(interval);
       }, []);
+
+      // Auto-scroll al día de hoy al cargar la app
+      useEffect(() => {
+        // La clave: Solo hacer scroll cuando 'loading' es false (ya no pone "Cargando...")
+        if (!loading && dias.length > 0 && kanbanScrollRef.current) {
+          setTimeout(() => {
+            const todayCol = kanbanScrollRef.current.querySelector('[data-hoy="true"]');
+            if (todayCol) {
+              const container = kanbanScrollRef.current;
+              // Calculamos la posición exacta para dejar la columna de HOY en el centro visual del contenedor
+              const scrollPos = todayCol.offsetLeft - (container.offsetWidth / 2) + (todayCol.offsetWidth / 2);
+              container.scrollTo({ left: scrollPos, behavior: 'smooth' });
+            }
+          }, 200); // Pequeño margen para que las tarjetas terminen de pintarse
+        }
+      }, [loading, dias]);
 
       useEffect(() => {
         if (!fbLoaded) return;
@@ -484,11 +505,11 @@
           </div>
 
           {/* 3) PRINCIPAL (TABLERO KANBAN) */}
-          <div className="h-[40dvh] flex-1 overflow-x-auto overflow-y-hidden p-2 flex gap-3 items-start bg-slate-100/50">
+          <div ref={kanbanScrollRef} className="h-[40dvh] flex-1 overflow-x-auto overflow-y-hidden p-2 flex gap-3 items-start bg-slate-100/50 scroll-smooth">
             {dias.map(dia => {
               const tareasDelDia = boardTasks.filter(t => t.dayId === dia.id).sort((a, b) => (a.order || 0) - (b.order || 0));
               return (
-                <div key={dia.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDropOnColumn(e, dia)} className="flex-shrink-0 w-64 bg-slate-100/80 border-2 border-dashed border-slate-200 rounded-xl flex flex-col h-full shadow-sm">
+                <div key={dia.id} data-hoy={dia.esHoy ? "true" : "false"} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDropOnColumn(e, dia)} className="flex-shrink-0 w-64 bg-slate-100/80 border-2 border-dashed border-slate-200 rounded-xl flex flex-col h-full shadow-sm">
                   
                   <div className={`border-b border-slate-200 p-1.5 text-center rounded-t-lg sticky top-0 z-10 shadow-sm transition-colors ${dia.esHoy ? 'bg-emerald-100' : 'bg-slate-200/50'}`}>
                     <span className="font-extrabold text-lg text-slate-800">
@@ -631,7 +652,7 @@
             </div>
           </div>
 
-          {/* MODAL 1) HISTÓRICO STRICTO */}
+                    {/* MODAL 1) HISTÓRICO Y BUSCADOR */}
           {showCalendarModal && (() => {
             const year = currentMonth.getFullYear();
             const month = currentMonth.getMonth();
@@ -642,82 +663,166 @@
             const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
             const todayStr = getLocalIsoDate(new Date());
 
+            // Recopilar todo el histórico uniendo historyTasks y las tareas de hoy en vivo si procede
+            const allTasksHistory = [
+              ...historyTasks,
+              ...boardTasks.map(t => ({ ...t, snapshotDate: t.targetDateStr || t.dateString || todayStr }))
+            ];
+
+            // Filtrar tareas según el buscador avanzado
+            const filteredHistoryTasks = allTasksHistory.filter(t => {
+              const textMatch = !historySearchText.trim() || 
+                (t.description && t.description.toLowerCase().includes(historySearchText.toLowerCase())) || 
+                (t.notes && t.notes.toLowerCase().includes(historySearchText.toLowerCase()));
+              
+              const fincaMatch = historySearchFincaId === 'ALL' || t.fincaId === historySearchFincaId;
+              
+              const workerMatch = historySearchWorkerId === 'ALL' || 
+                (t.workerIds && t.workerIds.includes(historySearchWorkerId)) ||
+                (t.finalWorkers && t.finalWorkers.includes(historySearchWorkerId));
+
+              return textMatch && fincaMatch && workerMatch;
+            }).sort((a, b) => (b.snapshotDate || '').localeCompare(a.snapshotDate || ''));
+
             return (
               <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setShowCalendarModal(false); setSelectedCalendarDate(null); }}>
-                <div className="bg-white rounded-xl shadow-xl w-full max-w-sm flex flex-col overflow-hidden max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                  <div className="bg-blue-50 flex justify-between items-center p-3 border-b border-blue-100 shrink-0">
-                    <h2 className="font-bold text-base text-blue-900 flex items-center gap-2">📅 Histórico {selectedCalendarDate === todayStr ? <span className="text-emerald-600 text-[11px] bg-emerald-100 px-2 py-0.5 rounded-full ml-1">En vivo (Hoy)</span> : "de Días Pasados"}</h2>
-                    <button onClick={() => { setShowCalendarModal(false); setSelectedCalendarDate(null); }} className="text-slate-500 text-lg hover:bg-blue-200 rounded-full w-7 h-7 flex items-center justify-center">❌</button>
+                <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col overflow-hidden max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                  
+                  {/* Cabecera del modal */}
+                  <div className="bg-blue-50 flex flex-col border-b border-blue-100 shrink-0">
+                    <div className="flex justify-between items-center p-3 pb-2">
+                      <h2 className="font-bold text-base text-blue-900 flex items-center gap-2">📅 Registro e Histórico</h2>
+                      <button onClick={() => { setShowCalendarModal(false); setSelectedCalendarDate(null); }} className="text-slate-500 text-lg hover:bg-blue-200 rounded-full w-7 h-7 flex items-center justify-center">❌</button>
+                    </div>
+                    {/* Selector de Pestañas: Calendario vs Buscador */}
+                    <div className="flex px-3 gap-2 pb-1">
+                      <button onClick={() => setHistoryViewMode('calendar')} className={`flex-1 py-1.5 font-bold text-xs rounded-t-lg transition-colors ${historyViewMode === 'calendar' ? 'bg-white text-blue-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                        📅 Por Calendario
+                      </button>
+                      <button onClick={() => setHistoryViewMode('search')} className={`flex-1 py-1.5 font-bold text-xs rounded-t-lg transition-colors ${historyViewMode === 'search' ? 'bg-white text-blue-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                        🔍 Buscador Avanzado
+                      </button>
+                    </div>
                   </div>
-                  <div className="p-4 overflow-y-auto">
-                    <div className="flex justify-between items-center mb-4">
-                      <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} className="p-2 hover:bg-slate-100 rounded-lg font-bold text-slate-600">◀</button>
-                      <div className="font-bold text-lg text-slate-800 capitalize">{monthNames[month]} {year}</div>
-                      <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-2 hover:bg-slate-100 rounded-lg font-bold text-slate-600">▶</button>
-                    </div>
-                    <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-500 mb-2">
-                      <div>L</div><div>M</div><div>X</div><div>J</div><div>V</div><div>S</div><div>D</div>
-                    </div>
-                    <div className="grid grid-cols-7 gap-1 text-center mb-4">
-                      {blanks.map(b => <div key={`blank-${b}`} className="p-2"></div>)}
-                      {days.map(d => {
-                        const dateObj = new Date(year, month, d);
-                        const dateStr = getLocalIsoDate(dateObj);
-                        const isToday = todayStr === dateStr;
-                        const isFuture = dateStr > todayStr;
-                        const isSelected = selectedCalendarDate === dateStr;
-                        
-                        const hasSnapshot = historyTasks.some(t => t.snapshotDate === dateStr) || (isToday && boardTasks.some(t => t.dateString === dateStr));
 
-                        return (
-                          <div key={d} onClick={() => !isFuture && setSelectedCalendarDate(dateStr)} 
-                               className={`p-1.5 rounded-lg text-sm font-semibold flex flex-col items-center justify-center transition-all ${isFuture ? 'opacity-30 cursor-not-allowed text-slate-300' : 'cursor-pointer hover:bg-slate-100 text-slate-700'} ${isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''} ${isToday ? 'bg-blue-600 text-white shadow-md' : ''}`}>
-                            <span>{d}</span>
-                            <div className={`w-1.5 h-1.5 rounded-full mt-0.5 ${hasSnapshot ? (isToday ? 'bg-white' : 'bg-emerald-500') : 'bg-transparent'}`}></div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    
-                    {selectedCalendarDate && (
-                      <div className="border-t pt-3">
-                        <div className="flex justify-between items-center mb-2">
-                          <h4 className="font-bold text-sm text-slate-700">Foto del {selectedCalendarDate.split('-').reverse().join('/')}</h4>
+                  <div className="p-4 overflow-y-auto flex-1 bg-slate-50/50">
+                    {historyViewMode === 'calendar' ? (
+                      <div>
+                        <div className="flex justify-between items-center mb-4">
+                          <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} className="p-2 hover:bg-slate-100 rounded-lg font-bold text-slate-600">◀</button>
+                          <div className="font-bold text-lg text-slate-800 capitalize">{monthNames[month]} {year}</div>
+                          <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-2 hover:bg-slate-100 rounded-lg font-bold text-slate-600">▶</button>
                         </div>
-                        <div className="space-y-1.5">
-                          {(selectedCalendarDate === todayStr 
-                              ? boardTasks.filter(t => {
-                                  const currentDayObj = dias.find(d => d.esHoy);
-                                  return t.dayId === (currentDayObj ? currentDayObj.id : null) || t.dateString === todayStr;
-                                }).map(t => ({...t, snapshotDate: todayStr}))
-                              : historyTasks.filter(t => t.snapshotDate === selectedCalendarDate)
-                          ).map(t => {
-                            const finca = getFincaData(t.fincaId);
-                            const tWorkers = workers.filter(w => (t.workerIds || []).includes(w.id));
+                        <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-500 mb-2">
+                          <div>L</div><div>M</div><div>X</div><div>J</div><div>V</div><div>S</div><div>D</div>
+                        </div>
+                        <div className="grid grid-cols-7 gap-1 text-center mb-4">
+                          {blanks.map(b => <div key={`blank-${b}`} className="p-2"></div>)}
+                          {days.map(d => {
+                            const dateObj = new Date(year, month, d);
+                            const dateStr = getLocalIsoDate(dateObj);
+                            const isToday = todayStr === dateStr;
+                            const isFuture = dateStr > todayStr;
+                            const isSelected = selectedCalendarDate === dateStr;
+                            
+                            const hasSnapshot = historyTasks.some(t => t.snapshotDate === dateStr) || (isToday && boardTasks.some(t => (t.targetDateStr || t.dateString) === dateStr));
+
                             return (
-                              <div key={t.id} onClick={() => setShowHistoryDetailModal(t)} className="text-xs p-2 rounded-lg bg-slate-50 hover:bg-blue-50 cursor-pointer border border-slate-200 transition-colors flex flex-col gap-1 shadow-sm">
+                              <div key={d} onClick={() => !isFuture && setSelectedCalendarDate(dateStr)} 
+                                   className={`p-1.5 rounded-lg text-sm font-semibold flex flex-col items-center justify-center transition-all ${isFuture ? 'opacity-30 cursor-not-allowed text-slate-300' : 'cursor-pointer hover:bg-slate-100 text-slate-700'} ${isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''} ${isToday ? 'bg-blue-600 text-white shadow-md' : ''}`}>
+                                <span>{d}</span>
+                                <div className={`w-1.5 h-1.5 rounded-full mt-0.5 ${hasSnapshot ? (isToday ? 'bg-white' : 'bg-emerald-500') : 'bg-transparent'}`}></div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        
+                        {selectedCalendarDate && (
+                          <div className="border-t pt-3">
+                            <div className="flex justify-between items-center mb-2">
+                              <h4 className="font-bold text-sm text-slate-700">Foto del {selectedCalendarDate.split('-').reverse().join('/')}</h4>
+                            </div>
+                            <div className="space-y-1.5">
+                              {allTasksHistory.filter(t => t.snapshotDate === selectedCalendarDate).map(t => {
+                                const finca = getFincaData(t.fincaId);
+                                const tWorkers = workers.filter(w => ((t.workerIds || t.finalWorkers) || []).includes(w.id));
+                                return (
+                                  <div key={t.id} onClick={() => setShowHistoryDetailModal(t)} className="text-xs p-2 rounded-lg bg-white hover:bg-blue-50 cursor-pointer border border-slate-200 transition-colors flex flex-col gap-1 shadow-sm">
+                                    <div className="flex justify-between items-center">
+                                      <div className="flex gap-1.5 items-center">
+                                        <span className={`w-2.5 h-2.5 rounded-sm shadow-sm shrink-0 ${finca.handleColor}`}></span>
+                                        <span className="font-bold text-slate-800">{finca.name}</span>
+                                      </div>
+                                      {t.stars > 0 && <span>{'⭐'.repeat(t.stars)}</span>}
+                                    </div>
+                                    <span className="text-slate-700 pl-4 font-semibold">{t.description}</span>
+                                    {tWorkers.length > 0 && (
+                                      <span className="text-[10px] text-blue-700 font-bold pl-4">👥 {tWorkers.map(w => w.name).join(', ')}</span>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                              {allTasksHistory.filter(t => t.snapshotDate === selectedCalendarDate).length === 0 && (
+                                <div className="text-xs text-slate-400 italic text-center p-2">No hay tareas registradas para este día.</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* VISTA BUSCADOR AVANZADO */
+                      <div className="space-y-3">
+                        <div className="space-y-2 bg-white p-3 rounded-lg border shadow-sm">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Buscar palabra (tarea o comentarios)</label>
+                            <input type="text" value={historySearchText} onChange={e => setHistorySearchText(e.target.value)} placeholder="Ej: tratamiento, manta, sulfato..." className="w-full p-2 text-xs border rounded outline-none focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Filtrar por Finca</label>
+                              <select value={historySearchFincaId} onChange={e => setHistorySearchFincaId(e.target.value)} className="w-full p-1.5 text-xs border rounded bg-white outline-none">
+                                <option value="ALL">Todas las fincas</option>
+                                {fincas.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Filtrar por Trabajador</label>
+                              <select value={historySearchWorkerId} onChange={e => setHistorySearchWorkerId(e.target.value)} className="w-full p-1.5 text-xs border rounded bg-white outline-none">
+                                <option value="ALL">Todos</option>
+                                {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center text-xs font-bold text-slate-500 px-1">
+                            <span>Resultados ({filteredHistoryTasks.length})</span>
+                          </div>
+                          {filteredHistoryTasks.map(t => {
+                            const finca = getFincaData(t.fincaId);
+                            const tWorkers = workers.filter(w => ((t.workerIds || t.finalWorkers) || []).includes(w.id));
+                            const formattedDate = t.snapshotDate ? t.snapshotDate.split('-').reverse().join('/') : '';
+                            return (
+                              <div key={t.id + (t.snapshotDate || '')} onClick={() => setShowHistoryDetailModal(t)} className="text-xs p-2.5 rounded-lg bg-white hover:bg-blue-50 cursor-pointer border border-slate-200 transition-colors flex flex-col gap-1 shadow-sm">
                                 <div className="flex justify-between items-center">
                                   <div className="flex gap-1.5 items-center">
                                     <span className={`w-2.5 h-2.5 rounded-sm shadow-sm shrink-0 ${finca.handleColor}`}></span>
                                     <span className="font-bold text-slate-800">{finca.name}</span>
+                                    <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded ml-1">📅 {formattedDate}</span>
                                   </div>
                                   {t.stars > 0 && <span>{'⭐'.repeat(t.stars)}</span>}
                                 </div>
-                                <span className="text-slate-700 pl-4 font-semibold">{t.description}</span>
+                                <span className="text-slate-800 pl-4 font-semibold">{t.description}</span>
+                                {t.notes && <span className="text-[10px] text-amber-800 bg-amber-50 p-1 rounded pl-4 line-clamp-1">📝 {t.notes}</span>}
                                 {tWorkers.length > 0 && (
                                   <span className="text-[10px] text-blue-700 font-bold pl-4">👥 {tWorkers.map(w => w.name).join(', ')}</span>
                                 )}
                               </div>
-                            )
+                            );
                           })}
-                          {(selectedCalendarDate === todayStr 
-                              ? boardTasks.filter(t => {
-                                  const currentDayObj = dias.find(d => d.esHoy);
-                                  return t.dayId === (currentDayObj ? currentDayObj.id : null) || t.dateString === todayStr;
-                                })
-                              : historyTasks.filter(t => t.snapshotDate === selectedCalendarDate)
-                          ).length === 0 && (
-                            <div className="text-xs text-slate-400 italic text-center p-2">{selectedCalendarDate === todayStr ? "No hay tareas programadas para hoy." : "No hay foto archivada para este día."}</div>
+                          {filteredHistoryTasks.length === 0 && (
+                            <div className="text-xs text-slate-400 italic text-center p-6 bg-white rounded-lg border">No se encontraron tareas con esos filtros.</div>
                           )}
                         </div>
                       </div>
