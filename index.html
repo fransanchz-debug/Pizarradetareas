@@ -12,7 +12,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -100,7 +100,7 @@
     // ===== FIN AVISO DE GUARDADO =====
 
     window.FirebaseAPI = {
-      auth, db, signInAnonymously, onAuthStateChanged,
+      auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
       collection, doc, query,
       onSnapshot: trackedOnSnapshot,
       addDoc: trackWrite(addDoc),
@@ -131,6 +131,54 @@
       { id: 'pink', color: 'bg-pink-100 border-pink-500 text-pink-900', handleColor: 'bg-pink-500' },
       { id: 'yellow', color: 'bg-yellow-100 border-yellow-500 text-yellow-900', handleColor: 'bg-yellow-500' }
     ];
+
+    function LoginScreen() {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [msg, setMsg] = useState(null);
+      const [busy, setBusy] = useState(false);
+
+      const traducir = (e) => {
+        const c = (e && e.code) || '';
+        if (c.includes('invalid-credential') || c.includes('wrong-password') || c.includes('user-not-found') || c.includes('invalid-email')) return 'Correo o contraseña incorrectos.';
+        if (c.includes('too-many-requests')) return 'Demasiados intentos. Espera unos minutos.';
+        if (c.includes('network')) return 'Sin conexión. Revisa internet.';
+        return 'No se ha podido entrar (' + (c || 'error') + ').';
+      };
+
+      const entrar = async (e) => {
+        e.preventDefault();
+        setBusy(true); setMsg(null);
+        try {
+          await window.FirebaseAPI.signInWithEmailAndPassword(window.FirebaseAPI.auth, email.trim(), password);
+        } catch (err) { setMsg({ ok: false, text: traducir(err) }); }
+        setBusy(false);
+      };
+
+      const recuperar = async () => {
+        if (!email.trim()) { setMsg({ ok: false, text: 'Escribe primero tu correo.' }); return; }
+        setBusy(true); setMsg(null);
+        try {
+          await window.FirebaseAPI.sendPasswordResetEmail(window.FirebaseAPI.auth, email.trim());
+          setMsg({ ok: true, text: 'Te hemos enviado un correo para crear una contraseña nueva. Mira también en spam.' });
+        } catch (err) { setMsg({ ok: false, text: traducir(err) }); }
+        setBusy(false);
+      };
+
+      return (
+        <div className="flex items-center justify-center h-[100dvh] bg-slate-50 p-4">
+          <form onSubmit={entrar} className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6 flex flex-col gap-3">
+            <h1 className="text-xl font-bold text-slate-800 text-center">Tareas Semanales</h1>
+            <p className="text-sm text-slate-500 text-center mb-2">Entra con tu correo y contraseña</p>
+            <input type="email" autoComplete="username" placeholder="Correo" value={email} onChange={e => setEmail(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-base" required />
+            <input type="password" autoComplete="current-password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-base" required />
+            <button type="submit" disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg py-2">{busy ? 'Entrando…' : 'Entrar'}</button>
+            <button type="button" onClick={recuperar} disabled={busy} className="text-sm text-blue-700 underline">He olvidado mi contraseña</button>
+            {msg && <div className={`text-sm rounded-lg p-2 text-center ${msg.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}>{msg.text}</div>}
+          </form>
+        </div>
+      );
+    }
 
     function App() {
       const [user, setUser] = useState(null);
@@ -244,9 +292,10 @@
         if (!fbLoaded) return;
         const initAuth = async () => {
           try {
-            const { auth, signInAnonymously, onAuthStateChanged } = window.FirebaseAPI;
-            await signInAnonymously(auth);
+            const { auth, onAuthStateChanged, signOut } = window.FirebaseAPI;
             onAuthStateChanged(auth, (currentUser) => {
+              // Las sesiones anónimas antiguas ya no valen: hay que entrar con correo y contraseña
+              if (currentUser && currentUser.isAnonymous) { signOut(auth); return; }
               setUser(currentUser);
               if (!currentUser) setLoading(false);
             });
@@ -538,6 +587,7 @@
       const getFincaData = (fincaId) => fincas.find(f => f.id === fincaId) || { name: '?', color: 'bg-gray-100 border-gray-400', handleColor: 'bg-gray-400' };
       const getFincaTag = (fincaName) => fincaName.replace(/Finca /i, 'F'); 
 
+      if (!user && !loading) return <LoginScreen />;
       if (loading) return <div className="flex items-center justify-center h-[100dvh] bg-slate-50 font-bold text-slate-500 text-xl">⏳ Cargando Tareas Semanales...</div>;
 
       return (
@@ -556,6 +606,9 @@
                 </button>
                 <button onClick={() => setShowSettingsModal(true)} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1 text-slate-700 transition-colors">
                   ⚙️ Ajustes
+                </button>
+                <button onClick={() => { if (confirm('¿Cerrar sesión en este dispositivo?')) window.FirebaseAPI.signOut(window.FirebaseAPI.auth); }} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm flex items-center text-slate-700 transition-colors" title={`Cerrar sesión (${user && user.email})`}>
+                  🚪
                 </button>
               </div>
             </header>

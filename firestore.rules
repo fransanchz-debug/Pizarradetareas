@@ -1,16 +1,21 @@
 rules_version = '2';
 
 // Reglas para la Pizarra de Tareas.
-// Copiar en: Firebase > Firestore Database > Reglas > Publicar.
-//
-// - No caducan (las reglas de "modo de prueba" dejaban de funcionar el 21/11/2026).
-// - Solo se puede leer/escribir si la app ha iniciado sesión (lo hace sola, de forma anónima).
-// - Solo se permite la carpeta de datos de esta app; todo lo demás queda cerrado.
+// Solo pueden leer y escribir las cuentas autorizadas (correo y contraseña).
+// Para autorizar a otra persona: crear su cuenta en Firebase > Authentication
+// y añadir aquí su identificador (UID).
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function esUsuarioAutorizado() {
+      return request.auth != null && request.auth.uid in [
+        'seq3CISgWIdOMnRGH2QAXvSHDyw1', // Fran
+        'LHagvsoFmJU9jHOV9TilSCY81r92'  // hermano de Fran
+      ];
+    }
+
     match /artifacts/ecologicos-almeria-v1/{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if esUsuarioAutorizado();
     }
 
   }
