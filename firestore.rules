@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// Reglas para la Pizarra de Tareas.
+// Copiar en: Firebase > Firestore Database > Reglas > Publicar.
+//
+// - No caducan (las reglas de "modo de prueba" dejaban de funcionar el 21/11/2026).
+// - Solo se puede leer/escribir si la app ha iniciado sesión (lo hace sola, de forma anónima).
+// - Solo se permite la carpeta de datos de esta app; todo lo demás queda cerrado.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /artifacts/ecologicos-almeria-v1/{document=**} {
+      allow read, write: if request.auth != null;
+    }
+
+  }
+}

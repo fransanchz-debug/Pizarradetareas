@@ -28,9 +28,85 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
 
+    // ===== AVISO DE GUARDADO =====
+    // Muestra un aviso en pantalla si un cambio tarda en guardarse (sin conexión)
+    // o si Firebase lo rechaza, y avisa antes de cerrar la app con cambios pendientes.
+    let pendingWrites = 0;
+    let slowTimer = null;
+    let errorShown = false;
+
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:99999;max-width:92vw;padding:10px 16px;border-radius:12px;font:600 14px system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.25);display:none;text-align:center;cursor:pointer;';
+    banner.addEventListener('click', () => { errorShown = false; refreshBanner(); });
+    const attachBanner = () => document.body.appendChild(banner);
+    if (document.body) attachBanner(); else document.addEventListener('DOMContentLoaded', attachBanner);
+
+    function showBanner(text, bg, color) {
+      banner.textContent = text;
+      banner.style.background = bg;
+      banner.style.color = color;
+      banner.style.display = 'block';
+    }
+
+    function refreshBanner() {
+      if (errorShown) return;
+      if (!navigator.onLine) {
+        showBanner('📵 Sin conexión. Los cambios NO se guardarán hasta que vuelva la conexión. No cierres la app.', '#fde68a', '#78350f');
+      } else if (pendingWrites > 0 && slowTimer === 'slow') {
+        showBanner('⏳ Guardando cambios… no cierres la app todavía.', '#fde68a', '#78350f');
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    function showError(e) {
+      console.error('Error al guardar en Firebase:', e);
+      errorShown = true;
+      showBanner('❌ NO se ha guardado el último cambio (' + ((e && (e.code || e.message)) || 'error') + '). Revisa la conexión y vuelve a hacerlo. Toca para cerrar.', '#fecaca', '#7f1d1d');
+    }
+
+    function trackWrite(fn) {
+      return (...args) => {
+        pendingWrites++;
+        if (slowTimer === null) {
+          slowTimer = setTimeout(() => { slowTimer = 'slow'; refreshBanner(); }, 4000);
+        }
+        let p;
+        try { p = Promise.resolve(fn(...args)); } catch (e) { p = Promise.reject(e); }
+        p.catch(showError).finally(() => {
+          pendingWrites--;
+          if (pendingWrites === 0) {
+            if (slowTimer !== 'slow') clearTimeout(slowTimer);
+            slowTimer = null;
+          }
+          refreshBanner();
+        });
+        return p;
+      };
+    }
+
+    function trackedOnSnapshot(ref, onNext, onError) {
+      return onSnapshot(ref, onNext, (e) => {
+        showError(e);
+        if (onError) onError(e);
+      });
+    }
+
+    window.addEventListener('online', refreshBanner);
+    window.addEventListener('offline', refreshBanner);
+    window.addEventListener('beforeunload', (e) => {
+      if (pendingWrites > 0) { e.preventDefault(); e.returnValue = ''; }
+    });
+    // ===== FIN AVISO DE GUARDADO =====
+
     window.FirebaseAPI = {
       auth, db, signInAnonymously, onAuthStateChanged,
-      collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, setDoc
+      collection, doc, query,
+      onSnapshot: trackedOnSnapshot,
+      addDoc: trackWrite(addDoc),
+      updateDoc: trackWrite(updateDoc),
+      deleteDoc: trackWrite(deleteDoc),
+      setDoc: trackWrite(setDoc)
     };
     
     window.dispatchEvent(new Event('firebase-modules-loaded'));
