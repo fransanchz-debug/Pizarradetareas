@@ -4,6 +4,8 @@ rules_version = '2';
 // Solo pueden leer y escribir las cuentas autorizadas (correo y contraseña).
 // Para autorizar a otra persona: crear su cuenta en Firebase > Authentication
 // y añadir aquí su identificador (UID).
+// El encargado (app espejo en Netlify) tiene su propia cuenta y SOLO puede LEER
+// las tareas de la pizarra, las fincas y los trabajadores.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -14,8 +16,19 @@ service cloud.firestore {
       ];
     }
 
+    function esEncargado() {
+      return request.auth != null && request.auth.uid in [
+        'a3RUHr2UIQVpM2w4eleC8GE7lZ53'  // encargado
+      ];
+    }
+
     match /artifacts/ecologicos-almeria-v1/{document=**} {
       allow read, write: if esUsuarioAutorizado();
+    }
+
+    // Solo lectura para el encargado (app espejo)
+    match /artifacts/ecologicos-almeria-v1/{coleccion}/{id} {
+      allow read: if esEncargado() && coleccion in ['board', 'fincas', 'workers'];
     }
 
   }
