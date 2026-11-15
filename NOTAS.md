@@ -36,3 +36,17 @@ Fran les ha dicho que avisen si las usan. Si hace falta reactivarlas:
 
 También existen datos de pruebas en `artifacts/ecologicos-almeria-pruebas-aisladas`
 y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa ninguna app.
+
+## Avisos diarios (copia de cuadrilla + Telegram)
+- `.github/workflows/avisos.yml` se ejecuta cada 15 minutos en GitHub Actions y
+  lanza `.github/scripts/avisos.py`.
+- Media hora antes de la hora de entrada (Ajustes > Avisos en la app):
+  copia la cuadrilla de ayer en las tareas de hoy iguales (misma finca y nombre)
+  sin trabajadores, y avisa por Telegram de lo copiado y de quién no tiene tarea.
+- GitHub entra en Firebase sin contraseñas (Workload Identity Federation):
+  cuenta técnica `pizarra-avisos@pizarra-de-tareas-semanales.iam.gserviceaccount.com`,
+  solo acepta al repositorio `fransanchz-debug/Pizarradetareas`.
+- La clave del bot de Telegram va en GitHub > Settings > Secrets and variables >
+  Actions > `TELEGRAM_BOT_TOKEN`. Sin ella, o sin nadie conectado, no hace nada.
+- Cada uno conecta su Telegram en Ajustes > Avisos > «Conectar mi Telegram».
+- Prueba manual: GitHub > Actions > «Avisos diarios» > Run workflow (marcar «forzar»).
