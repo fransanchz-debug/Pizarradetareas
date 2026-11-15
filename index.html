@@ -197,6 +197,9 @@
       
       const [showSettingsModal, setShowSettingsModal] = useState(false);
       const [settingsTab, setSettingsTab] = useState('fincas'); 
+      const [avisosConfig, setAvisosConfig] = useState({});
+      const [miAviso, setMiAviso] = useState(null);
+      const [horaEntradaEdit, setHoraEntradaEdit] = useState('');
       const [editingFinca, setEditingFinca] = useState(null);
       const [newWorkerName, setNewWorkerName] = useState('');
       const [editingCatalogTask, setEditingCatalogTask] = useState(null);
@@ -363,7 +366,15 @@
           setWorkers(items.sort((a, b) => a.name.localeCompare(b.name)));
         });
 
-        return () => { unsubFincas(); unsubCatalog(); unsubBoard(); unsubWorkers(); unsubHistory(); };
+        const { doc } = window.FirebaseAPI;
+        const unsubConfig = onSnapshot(doc(db, 'artifacts', APP_ID, 'config', 'general'), (snap) => {
+          setAvisosConfig(snap.exists() ? snap.data() : {});
+        });
+        const unsubMiAviso = onSnapshot(doc(db, 'artifacts', APP_ID, 'avisos', user.uid), (snap) => {
+          setMiAviso(snap.exists() ? snap.data() : null);
+        });
+
+        return () => { unsubFincas(); unsubCatalog(); unsubBoard(); unsubWorkers(); unsubHistory(); unsubConfig(); unsubMiAviso(); };
       }, [user]);
 
       // LÓGICA DE FOTO HISTÓRICO Y LIMPIEZA
@@ -411,6 +422,23 @@
         const interval = setInterval(processDailySnapshotsAndCleanup, 60000); 
         return () => clearInterval(interval);
       }, [boardTasks, historyTasks, user, fbLoaded]);
+
+      const guardarHoraEntrada = async () => {
+        if (!/^\d{2}:\d{2}$/.test(horaEntradaEdit)) return;
+        const { db, setDoc, doc } = window.FirebaseAPI;
+        await setDoc(doc(db, 'artifacts', APP_ID, 'config', 'general'), { horaEntrada: horaEntradaEdit }, { merge: true });
+        setHoraEntradaEdit('');
+      };
+
+      const conectarTelegram = async () => {
+        if (!avisosConfig.botUsername) return;
+        const bytes = new Uint8Array(9);
+        crypto.getRandomValues(bytes);
+        const code = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+        const { db, setDoc, doc } = window.FirebaseAPI;
+        await setDoc(doc(db, 'artifacts', APP_ID, 'avisos', user.uid), { code, email: user.email || '', chatId: null, pedidoEn: Date.now() }, { merge: true });
+        window.open(`https://t.me/${avisosConfig.botUsername}?start=${code}`, '_blank');
+      };
 
       const saveFinca = async (e) => {
         e.preventDefault();
@@ -1038,6 +1066,9 @@
                     <button onClick={() => setSettingsTab('workers')} className={`pb-2 font-bold text-xs border-b-2 transition-colors ${settingsTab === 'workers' ? 'border-blue-500 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                       👥 Trabajadores
                     </button>
+                    <button onClick={() => setSettingsTab('avisos')} className={`pb-2 font-bold text-xs border-b-2 transition-colors ${settingsTab === 'avisos' ? 'border-amber-500 text-amber-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                      🔔 Avisos
+                    </button>
                   </div>
                 </div>
 
@@ -1101,6 +1132,40 @@
                       </div>
                     </div>
                   )}
+
+                  {settingsTab === 'avisos' && (() => {
+                    const hora = avisosConfig.horaEntrada || '08:00';
+                    const [hh, mm] = hora.split(':').map(Number);
+                    const t = hh * 60 + mm - 30;
+                    const horaAviso = `${String(Math.floor(((t + 1440) % 1440) / 60)).padStart(2, '0')}:${String(((t % 60) + 60) % 60).padStart(2, '0')}`;
+                    return (
+                      <div className="space-y-3">
+                        <div className="bg-white p-3 rounded-lg border shadow-sm space-y-2">
+                          <h3 className="font-bold text-sm text-slate-800">🕗 Hora de entrada</h3>
+                          <p className="text-xs text-slate-500">Todos los días, media hora antes (a las <b>{horaAviso}</b>), se copia la cuadrilla de ayer en las tareas repetidas que estén sin trabajadores y os llega un aviso por Telegram.</p>
+                          <div className="flex gap-2 items-center">
+                            <input type="time" value={horaEntradaEdit || hora} onChange={e => setHoraEntradaEdit(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                            <button onClick={guardarHoraEntrada} disabled={!horaEntradaEdit || horaEntradaEdit === hora} className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white font-bold text-xs px-3 py-2 rounded-lg">Guardar</button>
+                          </div>
+                          <p className="text-[11px] text-slate-400">El aviso puede llegar unos minutos tarde (lo envía GitHub).</p>
+                        </div>
+                        <div className="bg-white p-3 rounded-lg border shadow-sm space-y-2">
+                          <h3 className="font-bold text-sm text-slate-800">📲 Mi Telegram</h3>
+                          {!avisosConfig.botUsername ? (
+                            <p className="text-xs text-slate-500">El bot de Telegram todavía no está configurado.</p>
+                          ) : miAviso && miAviso.chatId ? (
+                            <p className="text-xs text-emerald-700 font-bold">✅ Conectado. Te llegarán los avisos a tu Telegram.</p>
+                          ) : (
+                            <>
+                              <p className="text-xs text-slate-500">Pulsa el botón, se abrirá Telegram: dale a <b>Iniciar</b>. La conexión se confirma en unos 15 minutos.</p>
+                              <button onClick={conectarTelegram} className="bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs px-3 py-2 rounded-lg">Conectar mi Telegram</button>
+                              {miAviso && miAviso.code && <p className="text-[11px] text-amber-700">⏳ Pendiente de confirmar…</p>}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

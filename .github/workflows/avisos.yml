@@ -1,0 +1,41 @@
+name: Avisos diarios
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      forzar:
+        description: "Enviar el aviso de hoy ahora (aunque no sea la hora o ya se haya enviado)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: avisos
+  cancel-in-progress: false
+
+jobs:
+  avisos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/669734412138/locations/global/workloadIdentityPools/github/providers/github
+          service_account: pizarra-avisos@pizarra-de-tareas-semanales.iam.gserviceaccount.com
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install --quiet google-auth requests
+
+      - run: python .github/scripts/avisos.py ${{ inputs.forzar && '--forzar' || '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
