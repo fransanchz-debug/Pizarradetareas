@@ -220,11 +220,14 @@ def main():
     s = sesion()
     config = leer_doc(s, "config/general") or {}
 
-    if TG_TOKEN:
-        conectar_telegram(s, config)
-        config = leer_doc(s, "config/general") or {}
-    else:
-        print("Falta el secreto TELEGRAM_BOT_TOKEN: no se envían avisos.")
+    if not TG_TOKEN:
+        print("Falta el secreto TELEGRAM_BOT_TOKEN: no se hace nada hasta configurarlo.")
+        return
+    conectar_telegram(s, config)
+    config = leer_doc(s, "config/general") or {}
+    if not any(a.get("chatId") for a in leer_coleccion(s, "avisos") if a["id"] in CUENTAS_AVISOS):
+        print("Nadie ha conectado su Telegram todavía: no se copian cuadrillas.")
+        return
 
     ahora = dt.datetime.now(TZ)
     hoy = ahora.date().isoformat()
@@ -262,7 +265,7 @@ def main():
 
     actualizar_doc(s, "config/general", {"ultimoAviso": hoy})
 
-    if not tareas_hoy or not TG_TOKEN or (not copias and not sin_tarea):
+    if not tareas_hoy or (not copias and not sin_tarea):
         print("Nada que avisar hoy.")
         return
 
