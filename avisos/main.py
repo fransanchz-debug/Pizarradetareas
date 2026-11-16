@@ -284,17 +284,12 @@ class Datos:
         return out
 
     def lineas_faltas(self, faltan, hoy=""):
-        """Líneas «Faltan» y «No trabajan» (tipo «libre» marcado por el encargado)."""
-        def lista(tipo):
-            items = sorted(((i, m) for i, (t, m) in faltan.items() if (t == "libre") == (tipo == "libre")),
-                           key=lambda x: normalizar(self.nombres[x[0]]))
-            return html.escape(", ".join(self.nombres[i] + (f" ({m})" if m and m != "No trabaja" else "") for i, m in items))
-        out = []
-        if lista("falta"):
-            out.append(f"\n🏠 <b>Faltan{hoy}:</b> " + lista("falta"))
-        if lista("libre"):
-            out.append(f"\n💤 <b>No trabajan{hoy}:</b> " + lista("libre"))
-        return out
+        """Una sola línea «Faltan» con el motivo de cada uno."""
+        if not faltan:
+            return []
+        items = sorted(faltan.items(), key=lambda x: normalizar(self.nombres[x[0]]))
+        texto = ", ".join(self.nombres[i] + (f" ({m})" if m else "") for i, (_, m) in items)
+        return [f"\n🏠 <b>Faltan{hoy}:</b> " + html.escape(texto)]
 
 
 def enviar(s, texto):
