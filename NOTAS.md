@@ -47,7 +47,8 @@ y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa nin
 - 🚨 Emergencia X minutos antes de la entrada (45 por defecto, `minutosAntes`):
   copia la cuadrilla de ayer en las tareas de hoy iguales (misma finca y nombre)
   sin trabajadores y avisa solo si queda algo pendiente.
-- 📤 Envío a la app agrícola 15 min después de la hora de salida: quién ha
+- 📤 Envío a la app agrícola 15 min después de la hora de salida y otra vez a
+  las 23:50 (recoge las correcciones de la tarde; no pisa lo ya revisado): quién ha
   estado en qué tarea y finca, con la jornada (entrada, salida, descanso) para
   crear los partes de horas (función `recibir-pizarra` de gestion-agricola).
   Si no reconoce trabajadores o fincas, avisa por Telegram. Las faltas

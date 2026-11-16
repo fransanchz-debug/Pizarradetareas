@@ -12,8 +12,8 @@ También se puede lanzar a mano desde GitHub Actions (.github/workflows/avisos.y
      tarea (misma finca y mismo nombre) del día anterior.
    - Avisa por Telegram de lo copiado y de los trabajadores sin tarea hoy.
 
-4. 📤 Al terminar la jornada (15 min después de la salida), envía a la app
-   agrícola quién ha estado en qué tarea y finca, para los partes de horas.
+4. 📤 Al terminar la jornada (15 min después de la salida) y otra vez a las
+   23:50 (por si se corrige algo por la noche), envía a la app agrícola quién ha estado en qué tarea y finca, para los partes de horas.
    Las faltas apuntadas en la app agrícola no salen como "sin tarea".
 
 El repositorio es público: no se escriben nombres ni datos en el registro.
@@ -52,6 +52,7 @@ AGRI_KEY = os.environ.get("GESTION_AGRICOLA_CLAVE", "").strip()
 HORA_SALIDA_DEFECTO = "17:00"
 DESCANSO_DEFECTO = 30
 MINUTOS_TRAS_SALIDA = 15
+HORA_ENVIO_NOCHE = "23:50"  # segundo envío del día, con las correcciones de la tarde
 TG = f"https://api.telegram.org/bot{TG_TOKEN}"
 
 
@@ -439,10 +440,15 @@ def main(forzar_emergencia=False, forzar_recordatorio=False, forzar_envio=False)
         emergencia(s, ahora.date())
         actualizar_doc(s, "config/general", {"ultimoAviso": hoy})
 
-    # 📤 Envío a la app agrícola: 15 minutos después de la salida.
+    # 📤 Envío a la app agrícola: 15 minutos después de la salida, y otra vez a
+    # las 23:50 para que lleguen las correcciones hechas por la noche.
     if AGRI_KEY:
         salida = a_hora(ahora, config.get("horaSalida") or HORA_SALIDA_DEFECTO) + dt.timedelta(minutes=MINUTOS_TRAS_SALIDA)
-        if forzar_envio or toca(config, "ultimoEnvioAgricola", salida, salida + dt.timedelta(hours=6), ahora, hoy, s):
+        noche = a_hora(ahora, HORA_ENVIO_NOCHE)
+        for clave, desde, hasta in (("ultimoEnvioAgricola", salida, salida + dt.timedelta(hours=6)),
+                                    ("ultimoEnvioNoche", noche, noche + dt.timedelta(minutes=9))):
+            if not ((forzar_envio and clave == "ultimoEnvioAgricola") or toca(config, clave, desde, hasta, ahora, hoy, s)):
+                continue
             try:
                 enviar_agricola(s, config, ahora.date())
             except Exception as e:
@@ -451,7 +457,7 @@ def main(forzar_emergencia=False, forzar_recordatorio=False, forzar_envio=False)
                     enviar(s, "⚠️ No se han podido enviar hoy las horas a la app agrícola. Se sigue reintentando cada 5 minutos.")
                     actualizar_doc(s, "config/general", {"errorEnvioAgricola": hoy})
                 raise
-            actualizar_doc(s, "config/general", {"ultimoEnvioAgricola": hoy})
+            actualizar_doc(s, "config/general", {clave: hoy})
 
     # 🌙 Recordatorio: a su hora; si es por la tarde/noche, habla del día siguiente.
     hora_r = a_hora(ahora, config.get("horaRecordatorio") or HORA_RECORDATORIO_DEFECTO)
