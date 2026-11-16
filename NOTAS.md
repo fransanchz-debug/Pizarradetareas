@@ -38,15 +38,20 @@ También existen datos de pruebas en `artifacts/ecologicos-almeria-pruebas-aisla
 y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa ninguna app.
 
 ## Avisos diarios (copia de cuadrilla + Telegram)
-- `.github/workflows/avisos.yml` (provisional, cada 15 min en GitHub Actions) lanza
-  `avisos/main.py`. Destino: Google Cloud Scheduler cada 5 minutos.
-- 45 minutos antes de la hora de entrada (Ajustes > Avisos en la app):
-  copia la cuadrilla de ayer en las tareas de hoy iguales (misma finca y nombre)
-  sin trabajadores, y avisa por Telegram de lo copiado y de quién no tiene tarea.
-- GitHub entra en Firebase sin contraseñas (Workload Identity Federation):
-  cuenta técnica `pizarra-avisos@pizarra-de-tareas-semanales.iam.gserviceaccount.com`,
-  solo acepta al repositorio `fransanchz-debug/Pizarradetareas`.
-- La clave del bot de Telegram va en GitHub > Settings > Secrets and variables >
-  Actions > `TELEGRAM_BOT_TOKEN`. Sin ella, o sin nadie conectado, no hace nada.
+- Código: `avisos/main.py`. Lo ejecuta **Google Cloud Scheduler** cada 5 minutos
+  (trabajo `avisos-pizarra`, zona Europe/Madrid) llamando a la función
+  `avisos` (Cloud Run, región europe-west1).
+- 45 minutos antes de la hora de entrada (Ajustes > Avisos en la app; el margen
+  se puede cambiar con `minutosAntes` en `config/general`): copia la cuadrilla de
+  ayer en las tareas de hoy iguales (misma finca y nombre) sin trabajadores, y
+  avisa por Telegram de lo copiado y de quién no tiene tarea.
+- Cuenta técnica: `pizarra-avisos@pizarra-de-tareas-semanales.iam.gserviceaccount.com`
+  (lee/escribe Firestore, lee la clave del bot). GitHub también puede usarla sin
+  contraseñas (Workload Identity Federation, solo este repositorio).
+- Clave del bot (@PizarraEcologicosbot): en Google Secret Manager
+  `TELEGRAM_BOT_TOKEN` (la usa la función) y en GitHub > Settings > Secrets >
+  Actions `TELEGRAM_BOT_TOKEN` (para lanzarlo a mano). Si se cambia, cambiarla en los dos.
 - Cada uno conecta su Telegram en Ajustes > Avisos > «Conectar mi Telegram».
 - Prueba manual: GitHub > Actions > «Avisos diarios» > Run workflow (marcar «forzar»).
+- Facturación: proyecto en plan Blaze, cuenta «Mi cuenta de facturación 1».
+  Alerta de presupuesto de 1 € (avisa al 50 % y al 100 %). Uso esperado: 0 €.
