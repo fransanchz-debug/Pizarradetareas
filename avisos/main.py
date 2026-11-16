@@ -12,6 +12,10 @@ También se puede lanzar a mano desde GitHub Actions (.github/workflows/avisos.y
      tarea (misma finca y mismo nombre) del día anterior.
    - Avisa por Telegram de lo copiado y de los trabajadores sin tarea hoy.
 
+4. 📤 Al terminar la jornada (15 min después de la salida), envía a la app
+   agrícola quién ha estado en qué tarea y finca, para los partes de horas.
+   Las faltas apuntadas en la app agrícola no salen como "sin tarea".
+
 El repositorio es público: no se escriben nombres ni datos en el registro.
 """
 
@@ -43,6 +47,11 @@ CUENTAS_AVISOS = {
 }
 
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+AGRI_URL = "https://pykqyjynvtgstqzgnilu.supabase.co/functions/v1/recibir-pizarra"
+AGRI_KEY = os.environ.get("GESTION_AGRICOLA_CLAVE", "").strip()
+HORA_SALIDA_DEFECTO = "17:00"
+DESCANSO_DEFECTO = 30
+MINUTOS_TRAS_SALIDA = 15
 TG = f"https://api.telegram.org/bot{TG_TOKEN}"
 
 
@@ -251,9 +260,32 @@ class Datos:
     def equipo(self, ids):
         return html.escape(", ".join(self.nombres[w] for w in ids if w in self.nombres))
 
-    def sin_tarea(self, tareas, extra_ids=()):
-        asignados = {w for t in tareas for w in (t.get("workerIds") or [])} | set(extra_ids)
+    def sin_tarea(self, tareas, extra_ids=(), faltan=()):
+        asignados = {w for t in tareas for w in (t.get("workerIds") or [])} | set(extra_ids) | set(faltan)
         return sorted((n for i, n in self.nombres.items() if i not in asignados), key=normalizar)
+
+    def faltas(self, fecha):
+        """{id_pizarra: motivo} de quien está apuntado como ausente en la app agrícola."""
+        if not AGRI_KEY:
+            return {}
+        try:
+            r = requests.get(AGRI_URL, params={"ausencias": fecha}, headers={"x-clave": AGRI_KEY}, timeout=30)
+            r.raise_for_status()
+            lista = r.json()
+        except Exception as e:  # si falla, se avisa como antes
+            print(f"No se pudieron leer las faltas: {type(e).__name__}")
+            return {}
+        por_nombre = {normalizar(n): i for i, n in self.nombres.items()}
+        out = {}
+        for a in lista if isinstance(lista, list) else []:
+            i = a.get("id") if a.get("id") in self.nombres else por_nombre.get(normalizar(a.get("nombre")))
+            if i:
+                out[i] = a.get("motivo") or ""
+        return out
+
+    def texto_faltas(self, faltan):
+        return html.escape(", ".join(
+            self.nombres[i] + (f" ({m})" if m else "") for i, m in sorted(faltan.items(), key=lambda x: normalizar(self.nombres[x[0]]))))
 
 
 def enviar(s, texto):
@@ -284,9 +316,13 @@ def recordatorio(s, dia):
         if sin_cuadrilla:
             lineas.append("\n❗ <b>Tareas sin cuadrilla:</b>")
             lineas += [f"• {d.etiqueta(t)}" for t in sin_cuadrilla]
-        sin_tarea = d.sin_tarea(tareas, [w for _, eq in copias for w in eq])
+        faltan = d.faltas(fecha)
+        copias = [(t, [w for w in eq if w not in faltan]) for t, eq in copias]
+        sin_tarea = d.sin_tarea(tareas, [w for _, eq in copias for w in eq], faltan)
         if sin_tarea:
             lineas.append("\n⚠️ <b>Sin tarea asignada:</b> " + html.escape(", ".join(sin_tarea)))
+        if faltan:
+            lineas.append("\n🏠 <b>Faltan:</b> " + d.texto_faltas(faltan))
         if not copias and not sin_cuadrilla and not sin_tarea:
             lineas.append("\n✅ Todo asignado.")
     enviar(s, "\n".join(lineas))
@@ -297,6 +333,9 @@ def emergencia(s, dia):
     d = Datos(s)
     fecha, anterior = dia.isoformat(), (dia - dt.timedelta(days=1)).isoformat()
     tareas, copias = copiar_cuadrillas(d.board, d.history, set(d.nombres), fecha, anterior)
+    faltan = d.faltas(fecha) if tareas else {}
+    copias = [(t, [w for w in eq if w not in faltan]) for t, eq in copias]
+    copias = [(t, eq) for t, eq in copias if eq]
     for t, eq in copias:
         actualizar_doc(s, f"board/{t['id']}", {"workerIds": eq, "cuadrillaCopiadaDe": anterior})
         t["workerIds"] = eq
@@ -305,7 +344,7 @@ def emergencia(s, dia):
         print("Hoy no hay tareas: no se avisa.")
         return
     sin_cuadrilla = [t for t in tareas if not t.get("workerIds")]
-    sin_tarea = d.sin_tarea(tareas)
+    sin_tarea = d.sin_tarea(tareas, faltan=faltan)
     if not copias and not sin_cuadrilla and not sin_tarea:
         print("Todo en orden: no se avisa.")
         return
@@ -319,10 +358,62 @@ def emergencia(s, dia):
         lineas += [f"• {d.etiqueta(t)}" for t in sin_cuadrilla]
     if sin_tarea:
         lineas.append("\n⚠️ <b>Sin tarea asignada hoy:</b> " + html.escape(", ".join(sin_tarea)))
+    if faltan:
+        lineas.append("\n🏠 <b>Faltan hoy:</b> " + d.texto_faltas(faltan))
     enviar(s, "\n".join(lineas))
 
 
-def main(forzar_emergencia=False, forzar_recordatorio=False):
+def jornada(config):
+    entrada = config.get("horaEntrada") or HORA_ENTRADA_DEFECTO
+    salida = config.get("horaSalida") or HORA_SALIDA_DEFECTO
+    descanso = int(config.get("descansoMin") if config.get("descansoMin") is not None else DESCANSO_DEFECTO)
+    (h1, m1), (h2, m2) = ((int(x) for x in t.split(":")) for t in (entrada, salida))
+    horas = round(((h2 * 60 + m2) - (h1 * 60 + m1) - descanso) / 60, 2)
+    return {"entrada": entrada, "salida": salida, "descanso_min": descanso, "horas": horas}
+
+
+def enviar_agricola(s, config, dia):
+    """Manda a la app agrícola quién ha estado en qué tarea y finca ese día."""
+    d = Datos(s)
+    fecha = dia.isoformat()
+    tareas = {}
+    for t in d.history:
+        if t.get("snapshotDate") == fecha:
+            tareas[t.get("id", "").split("_", 1)[-1]] = t
+    for t in d.board:
+        if fecha_tarea(t) == fecha:
+            tareas[t["id"]] = t
+    if not tareas:
+        print("Envío a la app agrícola: hoy no hay tareas.")
+        return
+    por_trabajador = {}
+    for t in sorted(tareas.values(), key=lambda t: t.get("order") or 0):
+        finca = d.fincas.get(t.get("fincaId"), {}).get("name", "")
+        for w in t.get("workerIds") or []:
+            if w in d.nombres:
+                por_trabajador.setdefault(w, []).append({"finca": finca, "tarea": t.get("description") or ""})
+    cuerpo = {
+        "fecha": fecha,
+        "jornada": jornada(config),
+        "trabajadores": [{"id": i, "nombre": d.nombres[i], "tareas": ts} for i, ts in por_trabajador.items()],
+        "sin_tarea": [{"id": i, "nombre": n} for i, n in d.nombres.items() if i not in por_trabajador],
+    }
+    r = requests.post(AGRI_URL, json=cuerpo, headers={"x-clave": AGRI_KEY}, timeout=60)
+    r.raise_for_status()
+    res = r.json()
+    print(f"Envío a la app agrícola: {len(por_trabajador)} trabajadores, respuesta partes={res.get('partes')}.")
+    problemas = []
+    if res.get("trabajadores_sin_emparejar"):
+        problemas.append("👤 <b>Trabajadores que no reconoce:</b> " + html.escape(", ".join(map(str, res["trabajadores_sin_emparejar"]))))
+    if res.get("fincas_sin_emparejar"):
+        problemas.append("🌱 <b>Fincas que no reconoce:</b> " + html.escape(", ".join(map(str, res["fincas_sin_emparejar"]))))
+    if res.get("fincas_sin_cultivo_ese_dia"):
+        problemas.append("📅 <b>Fincas sin cultivo en curso ese día:</b> " + html.escape(", ".join(map(str, res["fincas_sin_cultivo_ese_dia"]))))
+    if problemas:
+        enviar(s, f"📤 <b>Horas del {DIAS[dia.weekday()]} {dia.day} enviadas a la app agrícola</b>, pero hay que revisar:\n\n" + "\n".join(problemas))
+
+
+def main(forzar_emergencia=False, forzar_recordatorio=False, forzar_envio=False):
     s = sesion()
     config = leer_doc(s, "config/general") or {}
 
@@ -344,6 +435,20 @@ def main(forzar_emergencia=False, forzar_recordatorio=False):
         emergencia(s, ahora.date())
         actualizar_doc(s, "config/general", {"ultimoAviso": hoy})
 
+    # 📤 Envío a la app agrícola: 15 minutos después de la salida.
+    if AGRI_KEY:
+        salida = a_hora(ahora, config.get("horaSalida") or HORA_SALIDA_DEFECTO) + dt.timedelta(minutes=MINUTOS_TRAS_SALIDA)
+        if forzar_envio or toca(config, "ultimoEnvioAgricola", salida, salida + dt.timedelta(hours=6), ahora, hoy, s):
+            try:
+                enviar_agricola(s, config, ahora.date())
+            except Exception as e:
+                print(f"Error al enviar a la app agrícola: {type(e).__name__}")
+                if config.get("errorEnvioAgricola") != hoy:  # avisar una sola vez al día
+                    enviar(s, "⚠️ No se han podido enviar hoy las horas a la app agrícola. Se sigue reintentando cada 5 minutos.")
+                    actualizar_doc(s, "config/general", {"errorEnvioAgricola": hoy})
+                raise
+            actualizar_doc(s, "config/general", {"ultimoEnvioAgricola": hoy})
+
     # 🌙 Recordatorio: a su hora; si es por la tarde/noche, habla del día siguiente.
     hora_r = a_hora(ahora, config.get("horaRecordatorio") or HORA_RECORDATORIO_DEFECTO)
     if forzar_recordatorio or toca(config, "ultimoRecordatorio", hora_r, hora_r + MARGEN_RECORDATORIO, ahora, hoy, s):
@@ -359,4 +464,5 @@ def avisos(request):
 
 
 if __name__ == "__main__":
-    main(forzar_emergencia="--forzar" in sys.argv, forzar_recordatorio="--recordatorio" in sys.argv)
+    main(forzar_emergencia="--forzar" in sys.argv, forzar_recordatorio="--recordatorio" in sys.argv,
+         forzar_envio="--enviar-agricola" in sys.argv)

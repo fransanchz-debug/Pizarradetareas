@@ -47,6 +47,12 @@ y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa nin
 - 🚨 Emergencia X minutos antes de la entrada (45 por defecto, `minutosAntes`):
   copia la cuadrilla de ayer en las tareas de hoy iguales (misma finca y nombre)
   sin trabajadores y avisa solo si queda algo pendiente.
+- 📤 Envío a la app agrícola 15 min después de la hora de salida: quién ha
+  estado en qué tarea y finca, con la jornada (entrada, salida, descanso) para
+  crear los partes de horas (función `recibir-pizarra` de gestion-agricola).
+  Si no reconoce trabajadores o fincas, avisa por Telegram. Las faltas
+  apuntadas en la app agrícola no salen como "sin tarea" y no se copian.
+  Clave: Secret Manager `GESTION_AGRICOLA_CLAVE` (copia en un documento de Drive de Fran).
 - Todo se ajusta en la app: Ajustes > Avisos (se guarda en `config/general`).
 - Cuenta técnica: `pizarra-avisos@pizarra-de-tareas-semanales.iam.gserviceaccount.com`
   (lee/escribe Firestore, lee la clave del bot). GitHub también puede usarla sin

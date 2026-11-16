@@ -425,12 +425,16 @@
 
       const guardarAvisos = async () => {
         const cambios = {};
-        for (const k of ['horaEntrada', 'horaRecordatorio']) {
+        for (const k of ['horaEntrada', 'horaSalida', 'horaRecordatorio']) {
           if (avisosEdit[k] !== undefined && /^\d{2}:\d{2}$/.test(avisosEdit[k])) cambios[k] = avisosEdit[k];
         }
         if (avisosEdit.minutosAntes !== undefined) {
           const n = parseInt(avisosEdit.minutosAntes, 10);
           if (n >= 5 && n <= 240) cambios.minutosAntes = n;
+        }
+        if (avisosEdit.descansoMin !== undefined) {
+          const n = parseInt(avisosEdit.descansoMin, 10);
+          if (n >= 0 && n <= 240) cambios.descansoMin = n;
         }
         if (Object.keys(cambios).length === 0) return;
         const { db, setDoc, doc } = window.FirebaseAPI;
@@ -1146,6 +1150,10 @@
                     const horaEntrada = valor('horaEntrada', '08:00');
                     const minutosAntes = Number(valor('minutosAntes', 45)) || 45;
                     const horaRecordatorio = valor('horaRecordatorio', '22:00');
+                    const horaSalida = valor('horaSalida', '17:00');
+                    const descansoMin = valor('descansoMin', 30);
+                    const aMin = (x) => { const [a, b] = (x || '0:0').split(':').map(Number); return a * 60 + b; };
+                    const horasJornada = Math.round((aMin(horaSalida) - aMin(horaEntrada) - (Number(descansoMin) || 0)) / 6) / 10;
                     const [hh, mm] = (horaEntrada || '08:00').split(':').map(Number);
                     const t = hh * 60 + mm - minutosAntes;
                     const horaAviso = `${String(Math.floor(((t + 1440) % 1440) / 60)).padStart(2, '0')}:${String(((t % 60) + 60) % 60).padStart(2, '0')}`;
@@ -1154,8 +1162,13 @@
                       <div className="space-y-3">
                         <div className="bg-white p-3 rounded-lg border shadow-sm space-y-3">
                           <div>
-                            <h3 className="font-bold text-sm text-slate-800">🕗 Hora de entrada</h3>
-                            <input type="time" value={horaEntrada} onChange={e => setAvisosEdit({ ...avisosEdit, horaEntrada: e.target.value })} className="mt-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                            <h3 className="font-bold text-sm text-slate-800">🕗 Jornada</h3>
+                            <div className="flex flex-wrap gap-3 mt-1 items-end">
+                              <label className="text-xs text-slate-600">Entrada<br /><input type="time" value={horaEntrada} onChange={e => setAvisosEdit({ ...avisosEdit, horaEntrada: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" /></label>
+                              <label className="text-xs text-slate-600">Salida<br /><input type="time" value={horaSalida} onChange={e => setAvisosEdit({ ...avisosEdit, horaSalida: e.target.value })} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" /></label>
+                              <label className="text-xs text-slate-600">Descanso (min)<br /><input type="number" min="0" max="240" step="5" value={descansoMin} onChange={e => setAvisosEdit({ ...avisosEdit, descansoMin: e.target.value })} className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" /></label>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1">Jornada de <b>{horasJornada} h</b>. Al terminar (15 min después de la salida) se envían a la app agrícola los trabajadores de cada tarea y finca.</p>
                           </div>
                           <div className="border-t pt-3">
                             <h3 className="font-bold text-sm text-slate-800">🌙 Recordatorio (la noche antes)</h3>
