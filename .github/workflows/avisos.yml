@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       forzar:
-        description: "Enviar el aviso de hoy ahora (aunque no sea la hora o ya se haya enviado)"
+        description: "Hacer ahora el aviso de emergencia de hoy (copia cuadrillas y avisa)"
+        type: boolean
+        default: false
+      recordatorio:
+        description: "Enviar ahora el recordatorio de mañana (solo informa)"
         type: boolean
         default: false
 
@@ -36,6 +40,6 @@ jobs:
 
       - run: pip install --quiet -r avisos/requirements.txt
 
-      - run: python avisos/main.py ${{ inputs.forzar && '--forzar' || '' }}
+      - run: python avisos/main.py ${{ inputs.forzar && '--forzar' || '' }} ${{ inputs.recordatorio && '--recordatorio' || '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

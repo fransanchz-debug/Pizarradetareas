@@ -5,8 +5,9 @@ También se puede lanzar a mano desde GitHub Actions (.github/workflows/avisos.y
 
 1. Conecta los Telegram de Fran y su hermano (mensajes "/start <código>" que
    genera la app en Ajustes > Avisos).
-2. Unos minutos antes de la hora de entrada (Ajustes > Avisos; 45 por defecto),
-   una vez al día:
+2. 🌙 Recordatorio (22:00 por defecto): cómo está planificado el día siguiente.
+   Solo informa.
+3. 🚨 Emergencia, unos minutos antes de la entrada (45 por defecto), una vez al día:
    - En las tareas de hoy sin trabajadores, copia la cuadrilla de la misma
      tarea (misma finca y mismo nombre) del día anterior.
    - Avisa por Telegram de lo copiado y de los trabajadores sin tarea hoy.
@@ -210,15 +211,118 @@ def copiar_cuadrillas(board, history, workers_ids, hoy, ayer):
     return tareas_hoy, copias
 
 
-def hora_aviso(config, ahora):
-    texto = config.get("horaEntrada") or HORA_ENTRADA_DEFECTO
+DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+HORA_RECORDATORIO_DEFECTO = "22:00"
+MARGEN_RECORDATORIO = dt.timedelta(hours=2)
+
+
+def a_hora(ahora, texto):
     hh, mm = (int(x) for x in texto.split(":"))
-    entrada = ahora.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    return ahora.replace(hour=hh, minute=mm, second=0, microsecond=0)
+
+
+def hora_aviso(config, ahora):
+    entrada = a_hora(ahora, config.get("horaEntrada") or HORA_ENTRADA_DEFECTO)
     antes = int(config.get("minutosAntes") or MINUTOS_ANTES_DEFECTO)
     return entrada - dt.timedelta(minutes=antes), entrada
 
 
-def main(forzar=False):
+def toca(config, clave, desde, hasta, ahora, hoy, s):
+    """True si ahora está en [desde, hasta] y hoy todavía no se ha hecho."""
+    if config.get(clave) == hoy or ahora < desde:
+        return False
+    if ahora > hasta:
+        actualizar_doc(s, "config/general", {clave: hoy})  # se pasó la hora: no avisar tarde
+        return False
+    return True
+
+
+class Datos:
+    def __init__(self, s):
+        self.board = leer_coleccion(s, "board")
+        self.history = leer_coleccion(s, "history")
+        self.fincas = {f["id"]: f for f in leer_coleccion(s, "fincas")}
+        self.nombres = {w["id"]: w.get("name", "?") for w in leer_coleccion(s, "workers")}
+
+    def etiqueta(self, t):
+        finca = self.fincas.get(t.get("fincaId"), {}).get("name", "?")
+        return f"{html.escape(t.get('description') or '?')} ({html.escape(finca)})"
+
+    def equipo(self, ids):
+        return html.escape(", ".join(self.nombres[w] for w in ids if w in self.nombres))
+
+    def sin_tarea(self, tareas, extra_ids=()):
+        asignados = {w for t in tareas for w in (t.get("workerIds") or [])} | set(extra_ids)
+        return sorted((n for i, n in self.nombres.items() if i not in asignados), key=normalizar)
+
+
+def enviar(s, texto):
+    enviados = 0
+    for a in leer_coleccion(s, "avisos"):
+        if a["id"] in CUENTAS_AVISOS and a.get("chatId"):
+            tg("sendMessage", chat_id=a["chatId"], text=texto, parse_mode="HTML")
+            enviados += 1
+    print(f"Avisos enviados: {enviados}.")
+
+
+def recordatorio(s, dia):
+    """Cómo está planificado `dia` (normalmente mañana). Solo informa."""
+    d = Datos(s)
+    fecha, anterior = dia.isoformat(), (dia - dt.timedelta(days=1)).isoformat()
+    tareas, copias = copiar_cuadrillas(d.board, d.history, set(d.nombres), fecha, anterior)
+    se_copian = {t["id"] for t, _ in copias}
+    sin_cuadrilla = [t for t in tareas if not t.get("workerIds") and t["id"] not in se_copian]
+    print(f"Recordatorio: {len(tareas)} tareas, {len(copias)} se copiarán, {len(sin_cuadrilla)} sin cuadrilla.")
+
+    lineas = [f"🌙 <b>Recordatorio: {DIAS[dia.weekday()]} {dia.day}</b>"]
+    if not tareas:
+        lineas.append("\n⚠️ No hay ninguna tarea planificada.")
+    else:
+        if copias:
+            lineas.append("\n🔁 <b>Se copiará la cuadrilla del día anterior:</b>")
+            lineas += [f"• {d.etiqueta(t)}: {d.equipo(eq)}" for t, eq in copias]
+        if sin_cuadrilla:
+            lineas.append("\n❗ <b>Tareas sin cuadrilla:</b>")
+            lineas += [f"• {d.etiqueta(t)}" for t in sin_cuadrilla]
+        sin_tarea = d.sin_tarea(tareas, [w for _, eq in copias for w in eq])
+        if sin_tarea:
+            lineas.append("\n⚠️ <b>Sin tarea asignada:</b> " + html.escape(", ".join(sin_tarea)))
+        if not copias and not sin_cuadrilla and not sin_tarea:
+            lineas.append("\n✅ Todo asignado.")
+    enviar(s, "\n".join(lineas))
+
+
+def emergencia(s, dia):
+    """Antes de entrar: copia las cuadrillas que falten y avisa si queda algo pendiente."""
+    d = Datos(s)
+    fecha, anterior = dia.isoformat(), (dia - dt.timedelta(days=1)).isoformat()
+    tareas, copias = copiar_cuadrillas(d.board, d.history, set(d.nombres), fecha, anterior)
+    for t, eq in copias:
+        actualizar_doc(s, f"board/{t['id']}", {"workerIds": eq, "cuadrillaCopiadaDe": anterior})
+        t["workerIds"] = eq
+    print(f"Emergencia: {len(tareas)} tareas, {len(copias)} cuadrillas copiadas.")
+    if not tareas:
+        print("Hoy no hay tareas: no se avisa.")
+        return
+    sin_cuadrilla = [t for t in tareas if not t.get("workerIds")]
+    sin_tarea = d.sin_tarea(tareas)
+    if not copias and not sin_cuadrilla and not sin_tarea:
+        print("Todo en orden: no se avisa.")
+        return
+
+    lineas = [f"🚨 <b>Antes de entrar: {DIAS[dia.weekday()]} {dia.day}</b>"]
+    if copias:
+        lineas.append("\n🔁 <b>Cuadrilla copiada de ayer:</b>")
+        lineas += [f"• {d.etiqueta(t)}: {d.equipo(eq)}" for t, eq in copias]
+    if sin_cuadrilla:
+        lineas.append("\n❗ <b>Tareas sin cuadrilla:</b>")
+        lineas += [f"• {d.etiqueta(t)}" for t in sin_cuadrilla]
+    if sin_tarea:
+        lineas.append("\n⚠️ <b>Sin tarea asignada hoy:</b> " + html.escape(", ".join(sin_tarea)))
+    enviar(s, "\n".join(lineas))
+
+
+def main(forzar_emergencia=False, forzar_recordatorio=False):
     s = sesion()
     config = leer_doc(s, "config/general") or {}
 
@@ -228,69 +332,24 @@ def main(forzar=False):
     conectar_telegram(s, config)
     config = leer_doc(s, "config/general") or {}
     if not any(a.get("chatId") for a in leer_coleccion(s, "avisos") if a["id"] in CUENTAS_AVISOS):
-        print("Nadie ha conectado su Telegram todavía: no se copian cuadrillas.")
+        print("Nadie ha conectado su Telegram todavía: no se hace nada.")
         return
 
     ahora = dt.datetime.now(TZ)
     hoy = ahora.date().isoformat()
-    ayer = (ahora.date() - dt.timedelta(days=1)).isoformat()
+
+    # 🚨 Emergencia: X minutos antes de la entrada de hoy.
     aviso, entrada = hora_aviso(config, ahora)
+    if forzar_emergencia or toca(config, "ultimoAviso", aviso, entrada + MARGEN_MAXIMO, ahora, hoy, s):
+        emergencia(s, ahora.date())
+        actualizar_doc(s, "config/general", {"ultimoAviso": hoy})
 
-    if not forzar:
-        if config.get("ultimoAviso") == hoy:
-            print("El aviso de hoy ya se hizo.")
-            return
-        if ahora < aviso:
-            print("Todavía no es la hora del aviso.")
-            return
-        if ahora > entrada + MARGEN_MAXIMO:
-            print("Demasiado tarde para el aviso de hoy.")
-            actualizar_doc(s, "config/general", {"ultimoAviso": hoy})
-            return
-
-    board = leer_coleccion(s, "board")
-    history = leer_coleccion(s, "history")
-    workers = leer_coleccion(s, "workers")
-    fincas = {f["id"]: f for f in leer_coleccion(s, "fincas")}
-    nombres = {w["id"]: w.get("name", "?") for w in workers}
-
-    tareas_hoy, copias = copiar_cuadrillas(board, history, set(nombres), hoy, ayer)
-    for t, equipo in copias:
-        actualizar_doc(s, f"board/{t['id']}", {"workerIds": equipo, "cuadrillaCopiadaDe": ayer})
-        t["workerIds"] = equipo
-    print(f"Tareas hoy: {len(tareas_hoy)}. Cuadrillas copiadas: {len(copias)}.")
-
-    sin_tarea = []
-    if tareas_hoy:
-        asignados = {w for t in tareas_hoy for w in (t.get("workerIds") or [])}
-        sin_tarea = sorted((n for i, n in nombres.items() if i not in asignados), key=normalizar)
-
-    actualizar_doc(s, "config/general", {"ultimoAviso": hoy})
-
-    if not tareas_hoy or (not copias and not sin_tarea):
-        print("Nada que avisar hoy.")
-        return
-
-    def etiqueta(t):
-        finca = fincas.get(t.get("fincaId"), {}).get("name", "?")
-        return f"{html.escape(t.get('description') or '?')} ({html.escape(finca)})"
-
-    dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-    lineas = [f"📋 <b>Tareas de hoy, {dias[ahora.weekday()]} {ahora.day}</b>"]
-    if copias:
-        lineas.append("\n🔁 <b>Cuadrilla copiada de ayer:</b>")
-        for t, equipo in copias:
-            lineas.append(f"• {etiqueta(t)}: {html.escape(', '.join(nombres[w] for w in equipo))}")
-    if sin_tarea:
-        lineas.append("\n⚠️ <b>Sin tarea asignada hoy:</b> " + html.escape(", ".join(sin_tarea)))
-    texto = "\n".join(lineas)
-
-    enviados = 0
-    for a in leer_coleccion(s, "avisos"):
-        if a["id"] in CUENTAS_AVISOS and a.get("chatId"):
-            tg("sendMessage", chat_id=a["chatId"], text=texto, parse_mode="HTML")
-            enviados += 1
-    print(f"Avisos enviados: {enviados}.")
+    # 🌙 Recordatorio: a su hora; si es por la tarde/noche, habla del día siguiente.
+    hora_r = a_hora(ahora, config.get("horaRecordatorio") or HORA_RECORDATORIO_DEFECTO)
+    if forzar_recordatorio or toca(config, "ultimoRecordatorio", hora_r, hora_r + MARGEN_RECORDATORIO, ahora, hoy, s):
+        dia = ahora.date() + dt.timedelta(days=1 if hora_r.hour >= 12 else 0)
+        recordatorio(s, dia)
+        actualizar_doc(s, "config/general", {"ultimoRecordatorio": hoy})
 
 
 def avisos(request):
@@ -300,4 +359,4 @@ def avisos(request):
 
 
 if __name__ == "__main__":
-    main(forzar="--forzar" in sys.argv)
+    main(forzar_emergencia="--forzar" in sys.argv, forzar_recordatorio="--recordatorio" in sys.argv)

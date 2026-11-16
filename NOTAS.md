@@ -41,10 +41,13 @@ y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa nin
 - Código: `avisos/main.py`. Lo ejecuta **Google Cloud Scheduler** cada 5 minutos
   (trabajo `avisos-pizarra`, zona Europe/Madrid) llamando a la función
   `avisos` (Cloud Run, región europe-west1).
-- 45 minutos antes de la hora de entrada (Ajustes > Avisos en la app; el margen
-  se puede cambiar con `minutosAntes` en `config/general`): copia la cuadrilla de
-  ayer en las tareas de hoy iguales (misma finca y nombre) sin trabajadores, y
-  avisa por Telegram de lo copiado y de quién no tiene tarea.
+- 🌙 Recordatorio a la hora fijada (22:00 por defecto, `horaRecordatorio`): cómo
+  está planificado el día siguiente (copias previstas, tareas sin cuadrilla,
+  trabajadores sin tarea). Solo informa.
+- 🚨 Emergencia X minutos antes de la entrada (45 por defecto, `minutosAntes`):
+  copia la cuadrilla de ayer en las tareas de hoy iguales (misma finca y nombre)
+  sin trabajadores y avisa solo si queda algo pendiente.
+- Todo se ajusta en la app: Ajustes > Avisos (se guarda en `config/general`).
 - Cuenta técnica: `pizarra-avisos@pizarra-de-tareas-semanales.iam.gserviceaccount.com`
   (lee/escribe Firestore, lee la clave del bot). GitHub también puede usarla sin
   contraseñas (Workload Identity Federation, solo este repositorio).
@@ -52,6 +55,7 @@ y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa nin
   `TELEGRAM_BOT_TOKEN` (la usa la función) y en GitHub > Settings > Secrets >
   Actions `TELEGRAM_BOT_TOKEN` (para lanzarlo a mano). Si se cambia, cambiarla en los dos.
 - Cada uno conecta su Telegram en Ajustes > Avisos > «Conectar mi Telegram».
-- Prueba manual: GitHub > Actions > «Avisos diarios» > Run workflow (marcar «forzar»).
+- Prueba manual: GitHub > Actions > «Avisos diarios» > Run workflow (marcar «forzar»
+  para la emergencia o «recordatorio» para el de la noche).
 - Facturación: proyecto en plan Blaze, cuenta «Mi cuenta de facturación 1».
   Alerta de presupuesto de 1 € (avisa al 50 % y al 100 %). Uso esperado: 0 €.

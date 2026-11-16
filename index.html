@@ -199,7 +199,7 @@
       const [settingsTab, setSettingsTab] = useState('fincas'); 
       const [avisosConfig, setAvisosConfig] = useState({});
       const [miAviso, setMiAviso] = useState(null);
-      const [horaEntradaEdit, setHoraEntradaEdit] = useState('');
+      const [avisosEdit, setAvisosEdit] = useState({});
       const [editingFinca, setEditingFinca] = useState(null);
       const [newWorkerName, setNewWorkerName] = useState('');
       const [editingCatalogTask, setEditingCatalogTask] = useState(null);
@@ -423,11 +423,19 @@
         return () => clearInterval(interval);
       }, [boardTasks, historyTasks, user, fbLoaded]);
 
-      const guardarHoraEntrada = async () => {
-        if (!/^\d{2}:\d{2}$/.test(horaEntradaEdit)) return;
+      const guardarAvisos = async () => {
+        const cambios = {};
+        for (const k of ['horaEntrada', 'horaRecordatorio']) {
+          if (avisosEdit[k] !== undefined && /^\d{2}:\d{2}$/.test(avisosEdit[k])) cambios[k] = avisosEdit[k];
+        }
+        if (avisosEdit.minutosAntes !== undefined) {
+          const n = parseInt(avisosEdit.minutosAntes, 10);
+          if (n >= 5 && n <= 240) cambios.minutosAntes = n;
+        }
+        if (Object.keys(cambios).length === 0) return;
         const { db, setDoc, doc } = window.FirebaseAPI;
-        await setDoc(doc(db, 'artifacts', APP_ID, 'config', 'general'), { horaEntrada: horaEntradaEdit }, { merge: true });
-        setHoraEntradaEdit('');
+        await setDoc(doc(db, 'artifacts', APP_ID, 'config', 'general'), cambios, { merge: true });
+        setAvisosEdit({});
       };
 
       const conectarTelegram = async () => {
@@ -1134,21 +1142,39 @@
                   )}
 
                   {settingsTab === 'avisos' && (() => {
-                    const hora = avisosConfig.horaEntrada || '08:00';
-                    const [hh, mm] = hora.split(':').map(Number);
-                    const minutosAntes = Number(avisosConfig.minutosAntes) || 45;
+                    const valor = (k, def) => avisosEdit[k] !== undefined ? avisosEdit[k] : (avisosConfig[k] ?? def);
+                    const horaEntrada = valor('horaEntrada', '08:00');
+                    const minutosAntes = Number(valor('minutosAntes', 45)) || 45;
+                    const horaRecordatorio = valor('horaRecordatorio', '22:00');
+                    const [hh, mm] = (horaEntrada || '08:00').split(':').map(Number);
                     const t = hh * 60 + mm - minutosAntes;
                     const horaAviso = `${String(Math.floor(((t + 1440) % 1440) / 60)).padStart(2, '0')}:${String(((t % 60) + 60) % 60).padStart(2, '0')}`;
+                    const hayCambios = Object.keys(avisosEdit).length > 0;
                     return (
                       <div className="space-y-3">
-                        <div className="bg-white p-3 rounded-lg border shadow-sm space-y-2">
-                          <h3 className="font-bold text-sm text-slate-800">🕗 Hora de entrada</h3>
-                          <p className="text-xs text-slate-500">Todos los días, {minutosAntes} minutos antes (a las <b>{horaAviso}</b>), se copia la cuadrilla de ayer en las tareas repetidas que estén sin trabajadores y os llega un aviso por Telegram.</p>
-                          <div className="flex gap-2 items-center">
-                            <input type="time" value={horaEntradaEdit || hora} onChange={e => setHoraEntradaEdit(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
-                            <button onClick={guardarHoraEntrada} disabled={!horaEntradaEdit || horaEntradaEdit === hora} className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white font-bold text-xs px-3 py-2 rounded-lg">Guardar</button>
+                        <div className="bg-white p-3 rounded-lg border shadow-sm space-y-3">
+                          <div>
+                            <h3 className="font-bold text-sm text-slate-800">🕗 Hora de entrada</h3>
+                            <input type="time" value={horaEntrada} onChange={e => setAvisosEdit({ ...avisosEdit, horaEntrada: e.target.value })} className="mt-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
                           </div>
-                          <p className="text-[11px] text-slate-400">El aviso puede llegar hasta 5 minutos después de esa hora.</p>
+                          <div className="border-t pt-3">
+                            <h3 className="font-bold text-sm text-slate-800">🌙 Recordatorio (la noche antes)</h3>
+                            <p className="text-xs text-slate-500">Cómo está planificado el día siguiente: tareas sin cuadrilla, las que se copiarán solas y quién se queda sin tarea. Solo informa, no cambia nada.</p>
+                            <input type="time" value={horaRecordatorio} onChange={e => setAvisosEdit({ ...avisosEdit, horaRecordatorio: e.target.value })} className="mt-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                          </div>
+                          <div className="border-t pt-3">
+                            <h3 className="font-bold text-sm text-slate-800">🚨 Aviso de emergencia</h3>
+                            <p className="text-xs text-slate-500">A las <b>{horaAviso}</b> se copia la cuadrilla de ayer en las tareas repetidas sin trabajadores, y os avisa solo si queda algo pendiente.</p>
+                            <div className="flex gap-2 items-center mt-1">
+                              <input type="number" min="5" max="240" step="5" value={minutosAntes} onChange={e => setAvisosEdit({ ...avisosEdit, minutosAntes: e.target.value })} className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                              <span className="text-xs text-slate-600">minutos antes de la entrada</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 items-center border-t pt-3">
+                            <button onClick={guardarAvisos} disabled={!hayCambios} className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white font-bold text-xs px-3 py-2 rounded-lg">Guardar</button>
+                            {hayCambios && <button onClick={() => setAvisosEdit({})} className="text-xs text-slate-500 underline">Deshacer</button>}
+                          </div>
+                          <p className="text-[11px] text-slate-400">Los avisos pueden llegar hasta 5 minutos después de su hora.</p>
                         </div>
                         <div className="bg-white p-3 rounded-lg border shadow-sm space-y-2">
                           <h3 className="font-bold text-sm text-slate-800">📲 Mi Telegram</h3>
@@ -1158,7 +1184,7 @@
                             <p className="text-xs text-emerald-700 font-bold">✅ Conectado. Te llegarán los avisos a tu Telegram.</p>
                           ) : (
                             <>
-                              <p className="text-xs text-slate-500">Pulsa el botón, se abrirá Telegram: dale a <b>Iniciar</b>. La conexión se confirma en unos 15 minutos.</p>
+                              <p className="text-xs text-slate-500">Pulsa el botón, se abrirá Telegram: dale a <b>Iniciar</b>. La conexión se confirma en unos 5 minutos.</p>
                               <button onClick={conectarTelegram} className="bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs px-3 py-2 rounded-lg">Conectar mi Telegram</button>
                               {miAviso && miAviso.code && <p className="text-[11px] text-amber-700">⏳ Pendiente de confirmar…</p>}
                             </>
