@@ -401,7 +401,9 @@ def enviar_agricola(s, config, dia):
     r = requests.post(AGRI_URL, json=cuerpo, headers={"x-clave": AGRI_KEY}, timeout=60)
     r.raise_for_status()
     res = r.json()
-    print(f"Envío a la app agrícola: {len(por_trabajador)} trabajadores, respuesta partes={res.get('partes')}.")
+    print(f"Envío a la app agrícola: {len(por_trabajador)} trabajadores. Respuesta: partes={res.get('partes')}, "
+          f"ya_revisados={res.get('ya_revisados')}, sin emparejar: trabajadores={len(res.get('trabajadores_sin_emparejar') or [])}, "
+          f"fincas={len(res.get('fincas_sin_emparejar') or [])}, sin cultivo={len(res.get('fincas_sin_cultivo_ese_dia') or [])}.")
     problemas = []
     if res.get("trabajadores_sin_emparejar"):
         problemas.append("👤 <b>Trabajadores que no reconoce:</b> " + html.escape(", ".join(map(str, res["trabajadores_sin_emparejar"]))))
