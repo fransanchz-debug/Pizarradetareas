@@ -1,5 +1,7 @@
 name: Avisos diarios
 
+# Provisional: GitHub lo lanza cada 15 min (poco puntual) hasta que funcione
+# Google Cloud Scheduler. Después quedará solo para lanzarlo a mano.
 on:
   schedule:
     - cron: "*/15 * * * *"
@@ -34,8 +36,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install --quiet google-auth requests
+      - run: pip install --quiet -r avisos/requirements.txt
 
-      - run: python .github/scripts/avisos.py ${{ inputs.forzar && '--forzar' || '' }}
+      - run: python avisos/main.py ${{ inputs.forzar && '--forzar' || '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

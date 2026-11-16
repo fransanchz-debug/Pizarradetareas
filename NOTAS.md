@@ -38,9 +38,9 @@ También existen datos de pruebas en `artifacts/ecologicos-almeria-pruebas-aisla
 y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa ninguna app.
 
 ## Avisos diarios (copia de cuadrilla + Telegram)
-- `.github/workflows/avisos.yml` se ejecuta cada 15 minutos en GitHub Actions y
-  lanza `.github/scripts/avisos.py`.
-- Media hora antes de la hora de entrada (Ajustes > Avisos en la app):
+- `.github/workflows/avisos.yml` (provisional, cada 15 min en GitHub Actions) lanza
+  `avisos/main.py`. Destino: Google Cloud Scheduler cada 5 minutos.
+- 45 minutos antes de la hora de entrada (Ajustes > Avisos en la app):
   copia la cuadrilla de ayer en las tareas de hoy iguales (misma finca y nombre)
   sin trabajadores, y avisa por Telegram de lo copiado y de quién no tiene tarea.
 - GitHub entra en Firebase sin contraseñas (Workload Identity Federation):

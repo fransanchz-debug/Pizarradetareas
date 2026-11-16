@@ -1,10 +1,12 @@
 """Avisos diarios de la Pizarra de Tareas.
 
-Lo ejecuta GitHub Actions cada 15 minutos (.github/workflows/avisos.yml):
+Lo ejecuta Google Cloud Scheduler cada 5 minutos (función de Cloud Run "avisos").
+También se puede lanzar a mano desde GitHub Actions (.github/workflows/avisos.yml).
 
 1. Conecta los Telegram de Fran y su hermano (mensajes "/start <código>" que
    genera la app en Ajustes > Avisos).
-2. Media hora antes de la hora de entrada (Ajustes > Avisos), una vez al día:
+2. Unos minutos antes de la hora de entrada (Ajustes > Avisos; 45 por defecto),
+   una vez al día:
    - En las tareas de hoy sin trabajadores, copia la cuadrilla de la misma
      tarea (misma finca y mismo nombre) del día anterior.
    - Avisa por Telegram de lo copiado y de los trabajadores sin tarea hoy.
@@ -29,7 +31,7 @@ BASE = f"https://firestore.googleapis.com/v1/projects/{PROJECT}/databases/(defau
 ROOT = f"{BASE}/artifacts/{APP_ID}"
 TZ = ZoneInfo("Europe/Madrid")
 HORA_ENTRADA_DEFECTO = "08:00"
-MINUTOS_ANTES = 30
+MINUTOS_ANTES_DEFECTO = 45
 # Si GitHub se retrasa mucho, no mandar un aviso pasado este margen tras la entrada.
 MARGEN_MAXIMO = dt.timedelta(hours=3)
 
@@ -212,11 +214,11 @@ def hora_aviso(config, ahora):
     texto = config.get("horaEntrada") or HORA_ENTRADA_DEFECTO
     hh, mm = (int(x) for x in texto.split(":"))
     entrada = ahora.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    return entrada - dt.timedelta(minutes=MINUTOS_ANTES), entrada
+    antes = int(config.get("minutosAntes") or MINUTOS_ANTES_DEFECTO)
+    return entrada - dt.timedelta(minutes=antes), entrada
 
 
-def main():
-    forzar = "--forzar" in sys.argv
+def main(forzar=False):
     s = sesion()
     config = leer_doc(s, "config/general") or {}
 
@@ -291,5 +293,11 @@ def main():
     print(f"Avisos enviados: {enviados}.")
 
 
-if __name__ == "__main__":
+def avisos(request):
+    """Punto de entrada de la función de Google Cloud (la llama Cloud Scheduler)."""
     main()
+    return "ok"
+
+
+if __name__ == "__main__":
+    main(forzar="--forzar" in sys.argv)
