@@ -280,12 +280,21 @@ class Datos:
         for a in lista if isinstance(lista, list) else []:
             i = a.get("id") if a.get("id") in self.nombres else por_nombre.get(normalizar(a.get("nombre")))
             if i:
-                out[i] = a.get("motivo") or ""
+                out[i] = (a.get("tipo") or "falta", a.get("motivo") or "")
         return out
 
-    def texto_faltas(self, faltan):
-        return html.escape(", ".join(
-            self.nombres[i] + (f" ({m})" if m else "") for i, m in sorted(faltan.items(), key=lambda x: normalizar(self.nombres[x[0]]))))
+    def lineas_faltas(self, faltan, hoy=""):
+        """Líneas «Faltan» y «No trabajan» (tipo «libre» marcado por el encargado)."""
+        def lista(tipo):
+            items = sorted(((i, m) for i, (t, m) in faltan.items() if (t == "libre") == (tipo == "libre")),
+                           key=lambda x: normalizar(self.nombres[x[0]]))
+            return html.escape(", ".join(self.nombres[i] + (f" ({m})" if m and m != "No trabaja" else "") for i, m in items))
+        out = []
+        if lista("falta"):
+            out.append(f"\n🏠 <b>Faltan{hoy}:</b> " + lista("falta"))
+        if lista("libre"):
+            out.append(f"\n💤 <b>No trabajan{hoy}:</b> " + lista("libre"))
+        return out
 
 
 def enviar(s, texto):
@@ -321,8 +330,7 @@ def recordatorio(s, dia):
         sin_tarea = d.sin_tarea(tareas, [w for _, eq in copias for w in eq], faltan)
         if sin_tarea:
             lineas.append("\n⚠️ <b>Sin tarea asignada:</b> " + html.escape(", ".join(sin_tarea)))
-        if faltan:
-            lineas.append("\n🏠 <b>Faltan:</b> " + d.texto_faltas(faltan))
+        lineas += d.lineas_faltas(faltan)
         if not copias and not sin_cuadrilla and not sin_tarea:
             lineas.append("\n✅ Todo asignado.")
     enviar(s, "\n".join(lineas))
@@ -358,8 +366,7 @@ def emergencia(s, dia):
         lineas += [f"• {d.etiqueta(t)}" for t in sin_cuadrilla]
     if sin_tarea:
         lineas.append("\n⚠️ <b>Sin tarea asignada hoy:</b> " + html.escape(", ".join(sin_tarea)))
-    if faltan:
-        lineas.append("\n🏠 <b>Faltan hoy:</b> " + d.texto_faltas(faltan))
+    lineas += d.lineas_faltas(faltan, " hoy")
     enviar(s, "\n".join(lineas))
 
 
