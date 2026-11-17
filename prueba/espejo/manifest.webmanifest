@@ -1,0 +1,14 @@
+{
+  "name": "PRUEBA Tareas de Hoy",
+  "short_name": "Prueba Tareas Hoy",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f1f5f9",
+  "theme_color": "#1d4ed8",
+  "lang": "es",
+  "icons": [
+    { "src": "../iconos/espejo-icono-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "../iconos/espejo-icono-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
