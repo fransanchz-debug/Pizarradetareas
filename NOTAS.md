@@ -75,3 +75,11 @@ y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa nin
   para la emergencia o «recordatorio» para el de la noche).
 - Facturación: proyecto en plan Blaze, cuenta «Mi cuenta de facturación 1».
   Alerta de presupuesto de 1 € (avisa al 50 % y al 100 %). Uso esperado: 0 €.
+
+## PENDIENTE: nombres de los trabajadores (cuando se deje AppSheet)
+Fran quiere que los trabajadores se llamen igual en las dos apps, con los nombres de la
+pizarra (p. ej. «Moussa Sacko», no «Mousaa Sacko»). NO se puede hacer mientras se use
+AppSheet: la copia de AppSheet a la app agrícola reconoce a los trabajadores por el nombre
+y crearía duplicados. Cuando se deje AppSheet, renombrar en la app agrícola (tabla
+`trabajadores`) con los nombres de la pizarra. La pizarra y la app agrícola se emparejan
+por identificador (`pizarra_trabajadores`), así que eso no se rompe.
