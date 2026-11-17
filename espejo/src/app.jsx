@@ -51,6 +51,23 @@ function LoginScreen() {
   );
 }
 
+// Visor de fotos a pantalla completa (tocar fuera o ✕ para cerrar; flechas si hay varias).
+function VisorFotos({ fotos, indice, onCambiar, onCerrar }) {
+  const foto = fotos[indice];
+  if (!foto) return null;
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center" onClick={onCerrar}>
+      <img src={foto.url} alt="" className="max-w-full max-h-full object-contain" onClick={e => e.stopPropagation()} />
+      <button onClick={onCerrar} aria-label="Cerrar" className="absolute top-3 right-3 text-white/90 text-3xl leading-none w-11 h-11 flex items-center justify-center rounded-full bg-black/40">✕</button>
+      {fotos.length > 1 && <>
+        <button onClick={e => { e.stopPropagation(); onCambiar((indice - 1 + fotos.length) % fotos.length); }} aria-label="Anterior" className="absolute left-2 top-1/2 -translate-y-1/2 text-white text-3xl w-11 h-11 rounded-full bg-black/40">‹</button>
+        <button onClick={e => { e.stopPropagation(); onCambiar((indice + 1) % fotos.length); }} aria-label="Siguiente" className="absolute right-2 top-1/2 -translate-y-1/2 text-white text-3xl w-11 h-11 rounded-full bg-black/40">›</button>
+        <div className="absolute bottom-4 left-0 right-0 text-center text-white/80 text-sm">{indice + 1} de {fotos.length}</div>
+      </>}
+    </div>
+  );
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [fincas, setFincas] = useState([]);
@@ -62,6 +79,7 @@ function App() {
 
   
   const [viewTaskMenu, setViewTaskMenu] = useState(null);
+  const [visor, setVisor] = useState(null); // { fotos, indice }
   const [fbLoaded, setFbLoaded] = useState(!!window.FirebaseAPI);
   
   useEffect(() => {
@@ -213,7 +231,10 @@ function App() {
                            <div className="flex gap-2 items-center">
                              <span className={`text-xs font-black px-2 py-0.5 rounded bg-white border shadow-sm text-slate-700 ${finca.color.split(' ')[1]}`}>{fincaEtiqueta}</span>
                            </div>
-                           {hasStars && <span className="text-2xl drop-shadow-[0_2px_4px_rgba(251,191,36,0.9)]">{`⭐`.repeat(task.stars)}</span>}
+                           <span className="flex items-center gap-2">
+                             {(task.fotos || []).length > 0 && <span className="text-sm font-bold text-slate-600">📷 {task.fotos.length}</span>}
+                             {hasStars && <span className="text-2xl drop-shadow-[0_2px_4px_rgba(251,191,36,0.9)]">{`⭐`.repeat(task.stars)}</span>}
+                           </span>
                          </div>
                          <span className="text-base font-bold text-slate-800 leading-tight">{task.description}</span>
                       </div>
@@ -255,7 +276,7 @@ function App() {
 
         return (
           <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setViewTaskMenu(null)}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden max-h-[92dvh]" onClick={e => e.stopPropagation()}>
               
               {/* Cabecera */}
               <div className={`p-4 text-white ${finca.handleColor} flex justify-between items-start`}>
@@ -269,7 +290,7 @@ function App() {
               </div>
               
               {/* Cuerpo */}
-              <div className="p-5 flex flex-col gap-4 bg-slate-50">
+              <div className="p-5 flex flex-col gap-4 bg-slate-50 overflow-y-auto flex-1">
                 
                 {/* Estrellas */}
                 {viewTaskMenu.stars > 0 && (
@@ -302,6 +323,18 @@ function App() {
                     <p className="text-sm text-slate-800 whitespace-pre-wrap font-medium leading-relaxed">{viewTaskMenu.notes}</p>
                   </div>
                 )}
+
+                {/* Fotos explicativas */}
+                {(viewTaskMenu.fotos || []).length > 0 && (
+                  <div className="bg-white p-3 rounded-lg border shadow-sm">
+                    <span className="block text-xs font-bold text-slate-600 uppercase mb-2">📷 Fotos de la tarea (toca para ampliar)</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {viewTaskMenu.fotos.map((f, i) => (
+                        <img key={f.ruta || f.url} src={f.url} alt="" loading="lazy" onClick={() => setVisor({ fotos: viewTaskMenu.fotos, indice: i })} className="w-full h-36 object-cover rounded-lg border cursor-pointer bg-slate-100" />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 
               </div>
               <div className="p-4 bg-white border-t text-center">
@@ -314,6 +347,7 @@ function App() {
         );
       })()}
 
+      {visor && <VisorFotos fotos={visor.fotos} indice={visor.indice} onCambiar={(i) => setVisor({ ...visor, indice: i })} onCerrar={() => setVisor(null)} />}
     </div>
   );
 }

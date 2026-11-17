@@ -8,6 +8,11 @@
   y subir también `app.js` y `app.css`. Si no, la web no cambia.
 - No subir un `index.html` antiguo de una sola pieza encima: se perderían los cambios.
 - Icono de la pantalla de inicio: `iconos/` y `manifest.webmanifest`.
+- Fotos de las tareas: se reducen en el móvil (1600 px, JPEG, ~100-400 KB) y se guardan
+  en Firebase Storage (`pizarra-de-tareas-semanales.firebasestorage.app`, región
+  US-CENTRAL1 con 5 GB gratis), carpeta `fotos/`. Reglas en `storage.rules`: suben Fran y su
+  hermano; las ven ellos y el encargado. En la tarea se guarda la lista `fotos` (url, ruta).
+  Al quitar una foto de una tarea no se borra el archivo (puede estar copiada en otra tarea).
 
 ## Apps y enlaces
 - **App principal** (Fran y su hermano, pueden modificar): GitHub Pages, `index.html` de este repositorio.

@@ -17,6 +17,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getStorage, ref as refArchivo, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
     import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, setDoc, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -103,6 +104,14 @@
     });
     // ===== FIN AVISO DE GUARDADO =====
 
+    // Sube una foto ya comprimida y devuelve su dirección para mostrarla.
+    const storage = getStorage(app);
+    async function subirFoto(blob, nombre) {
+      const r = refArchivo(storage, 'fotos/' + nombre);
+      await uploadBytes(r, blob, { contentType: 'image/jpeg', cacheControl: 'public,max-age=31536000' });
+      return getDownloadURL(r);
+    }
+
     window.FirebaseAPI = {
       auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
       collection, doc, query, where,
@@ -110,7 +119,8 @@
       addDoc: trackWrite(addDoc),
       updateDoc: trackWrite(updateDoc),
       deleteDoc: trackWrite(deleteDoc),
-      setDoc: trackWrite(setDoc)
+      setDoc: trackWrite(setDoc),
+      subirFoto: trackWrite(subirFoto)
     };
     
     window.dispatchEvent(new Event('firebase-modules-loaded'));

@@ -61,6 +61,38 @@ function LoginScreen() {
   );
 }
 
+// Reduce una foto a 1600 px como máximo y la pasa a JPEG (unos 200-400 KB).
+async function comprimirFoto(archivo, lado = 1600, calidad = 0.8) {
+  let img;
+  try { img = await createImageBitmap(archivo, { imageOrientation: 'from-image' }); }
+  catch (e) {
+    img = await new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = mal; i.src = URL.createObjectURL(archivo); });
+  }
+  const escala = Math.min(1, lado / Math.max(img.width, img.height));
+  const ancho = Math.round(img.width * escala), alto = Math.round(img.height * escala);
+  const lienzo = document.createElement('canvas'); lienzo.width = ancho; lienzo.height = alto;
+  lienzo.getContext('2d').drawImage(img, 0, 0, ancho, alto);
+  const blob = await new Promise(ok => lienzo.toBlob(ok, 'image/jpeg', calidad));
+  return { blob, ancho, alto };
+}
+
+// Visor de fotos a pantalla completa (tocar fuera o ✕ para cerrar; flechas si hay varias).
+function VisorFotos({ fotos, indice, onCambiar, onCerrar }) {
+  const foto = fotos[indice];
+  if (!foto) return null;
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center" onClick={onCerrar}>
+      <img src={foto.url} alt="" className="max-w-full max-h-full object-contain" onClick={e => e.stopPropagation()} />
+      <button onClick={onCerrar} aria-label="Cerrar" className="absolute top-3 right-3 text-white/90 text-3xl leading-none w-11 h-11 flex items-center justify-center rounded-full bg-black/40">✕</button>
+      {fotos.length > 1 && <>
+        <button onClick={e => { e.stopPropagation(); onCambiar((indice - 1 + fotos.length) % fotos.length); }} aria-label="Anterior" className="absolute left-2 top-1/2 -translate-y-1/2 text-white text-3xl w-11 h-11 rounded-full bg-black/40">‹</button>
+        <button onClick={e => { e.stopPropagation(); onCambiar((indice + 1) % fotos.length); }} aria-label="Siguiente" className="absolute right-2 top-1/2 -translate-y-1/2 text-white text-3xl w-11 h-11 rounded-full bg-black/40">›</button>
+        <div className="absolute bottom-4 left-0 right-0 text-center text-white/80 text-sm">{indice + 1} de {fotos.length}</div>
+      </>}
+    </div>
+  );
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [fincas, setFincas] = useState([]);
@@ -569,6 +601,32 @@ function App() {
     setBoardTaskMenu(null); setShowWorkersDropdown(false);
   };
 
+  // ---- Fotos de una tarea
+  const [visor, setVisor] = useState(null); // { fotos, indice }
+  const [subiendo, setSubiendo] = useState(null); // texto de progreso
+  const anadirFotos = async (archivos) => {
+    if (!boardTaskMenu || !archivos || !archivos.length) return;
+    const id = boardTaskMenu.id;
+    let fotos = [...(boardTaskMenu.fotos || [])];
+    const lista = [...archivos];
+    for (let i = 0; i < lista.length; i++) {
+      setSubiendo(lista.length > 1 ? `Subiendo foto ${i + 1} de ${lista.length}…` : 'Subiendo foto…');
+      try {
+        const { blob, ancho, alto } = await comprimirFoto(lista[i]);
+        const nombre = `${id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jpg`;
+        const url = await window.FirebaseAPI.subirFoto(blob, nombre);
+        fotos = [...fotos, { url, ruta: 'fotos/' + nombre, ancho, alto }];
+        setBoardTaskMenu(prev => prev && prev.id === id ? { ...prev, fotos } : prev);
+        await updateBoardTask(id, { fotos });
+      } catch (e) { console.error('Error al subir la foto:', e); }
+    }
+    setSubiendo(null);
+  };
+  const quitarFoto = (indice) => {
+    if (!window.confirm('¿Quitar esta foto de la tarea?')) return;
+    cambiarTarea({ fotos: (boardTaskMenu.fotos || []).filter((_, i) => i !== indice) });
+  };
+
   // ---- Añadir tareas a un día y repetir el día anterior
   const [nuevoDia, setNuevoDia] = useState(null);
   const [nuevoFincaId, setNuevoFincaId] = useState(null);
@@ -585,7 +643,7 @@ function App() {
     await Promise.all(nuevas.map((t, i) => addDoc(collection(db, 'artifacts', APP_ID, 'board'), {
       catalogTaskId: t.catalogTaskId || null, fincaId: t.fincaId, number: t.number || null, description: t.description,
       dayId: dia.id, dateString: dia.dateString, targetDateStr: dia.dateString, notes: '', workerIds: cuadrillaDe(t),
-      stars: t.stars || t.finalStars || 0, order: base + i, createdAt: base
+      stars: t.stars || t.finalStars || 0, fotos: t.fotos || [], order: base + i, createdAt: base
     })));
   };
 
@@ -642,9 +700,10 @@ function App() {
   // Nombres de finca con el mismo patrón en pantalla («Finca 1y2» → «Finca 1 y 2»; etiqueta «F1-2»).
   // No se cambia lo guardado: la app agrícola reconoce las fincas por su nombre exacto.
   const nombreFinca = (n) => (n || '?').replace(/\s*y\s*/gi, ' y ').replace(/\s+/g, ' ').trim();
-  const hayVentana = !!(boardTaskMenu || touchMenu || nuevoDia || showCalendarModal || showSettingsModal || showHistoryDetailModal || editingCatalogTask || editingFinca);
+  const hayVentana = !!(visor || boardTaskMenu || touchMenu || nuevoDia || showCalendarModal || showSettingsModal || showHistoryDetailModal || editingCatalogTask || editingFinca);
   const cerrarVentanasRef = useRef(null);
   cerrarVentanasRef.current = () => {
+    if (visor) { setVisor(null); window.history.pushState({ ventana: true }, ''); return; } // atrás con el visor abierto: cierra solo el visor
     if (boardTaskMenu) cerrarTareaMenu();
     setTouchMenu(null); setNuevoDia(null); setShowHistoryDetailModal(null); setShowCalendarModal(false);
     setSelectedCalendarDate(null); setShowSettingsModal(false); setEditingCatalogTask(null); setEditingFinca(null);
@@ -729,7 +788,10 @@ function App() {
                         <div className="px-2 py-1.5 flex-1 flex flex-col justify-center">
                           <div className="flex justify-between items-center mb-0.5">
                             <span className={`text-xs font-black px-1.5 rounded bg-white border text-slate-700 ${finca.color.split(' ')[1]}`}>{getFincaTag(finca.name)}</span>
-                            {hasStars && <span className="text-base">{'⭐'.repeat(task.stars)}</span>}
+                            <span className="flex items-center gap-1.5">
+                              {(task.fotos || []).length > 0 && <span className="text-xs font-bold text-slate-600">📷 {task.fotos.length}</span>}
+                              {hasStars && <span className="text-base">{'⭐'.repeat(task.stars)}</span>}
+                            </span>
                           </div>
                           <span className="text-sm font-semibold text-slate-800 leading-tight">{task.description}</span>
                         </div>
@@ -1062,10 +1124,21 @@ function App() {
                     <p className="text-xs text-slate-800 whitespace-pre-wrap font-medium">{showHistoryDetailModal.notes}</p>
                   </div>
                 )}
+
+                {(showHistoryDetailModal.fotos || []).length > 0 && (
+                  <div className="bg-white p-3 rounded-lg border shadow-sm">
+                    <span className="block text-xs font-bold text-slate-600 uppercase mb-2">📷 Fotos</span>
+                    <div className="flex gap-2 overflow-x-auto">
+                      {showHistoryDetailModal.fotos.map((f, i) => (
+                        <img key={f.ruta || f.url} src={f.url} alt="" loading="lazy" onClick={() => setVisor({ fotos: showHistoryDetailModal.fotos, indice: i })} className="w-20 h-20 object-cover rounded-lg border cursor-pointer bg-slate-100 shrink-0" />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 
               </div>
               <div className="p-3 bg-white border-t flex gap-2">
-                <button onClick={() => setShowHistoryDetailModal(null)} className="w-full py-2 bg-slate-200 text-slate-700 rounded-lg font-bold text-xs hover:bg-slate-300 transition-colors">Cerrar Visor</button>
+                <button onClick={() => setShowHistoryDetailModal(null)} className="w-full py-2 bg-slate-200 text-slate-700 rounded-lg font-bold text-xs hover:bg-slate-300 transition-colors">Cerrar</button>
               </div>
             </div>
           </div>
@@ -1309,6 +1382,27 @@ function App() {
                   <textarea value={boardTaskMenu.notes || ''} onChange={(e) => cambiarNotas(e.target.value)} placeholder="📝 Detalles, maquinaria necesaria..." className="w-full p-2 border border-yellow-200 rounded bg-yellow-50/50 text-sm outline-none focus:ring-2 focus:ring-yellow-400 resize-none h-16" />
                 </div>
 
+                <div className="bg-white p-2.5 rounded-lg border flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-slate-700">📷 Fotos {(boardTaskMenu.fotos || []).length > 0 && <span className="font-semibold text-slate-500">({boardTaskMenu.fotos.length})</span>}</span>
+                    <label className={`text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-800 cursor-pointer hover:bg-slate-50 ${subiendo ? 'opacity-50 pointer-events-none' : ''}`}>
+                      ＋ Añadir fotos
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={e => { anadirFotos(e.target.files); e.target.value = ''; }} />
+                    </label>
+                  </div>
+                  {subiendo && <div className="text-xs font-semibold text-blue-700">⏳ {subiendo}</div>}
+                  {(boardTaskMenu.fotos || []).length > 0 ? (
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {boardTaskMenu.fotos.map((f, i) => (
+                        <div key={f.ruta || f.url} className="relative shrink-0">
+                          <img src={f.url} alt="" loading="lazy" onClick={() => setVisor({ fotos: boardTaskMenu.fotos, indice: i })} className="w-20 h-20 object-cover rounded-lg border cursor-pointer bg-slate-100" />
+                          <button onClick={() => quitarFoto(i)} aria-label="Quitar foto" className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-white border border-slate-300 text-slate-600 text-xs leading-none shadow-sm">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : !subiendo && <div className="text-xs text-slate-500">Haz una foto o elige de tu galería para que se entienda bien la tarea.</div>}
+                </div>
+
                 <div className="bg-white px-2.5 py-2 rounded-lg border flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-600 shrink-0">Prioridad</span>
                   <div className="flex gap-1 flex-1">
@@ -1345,6 +1439,8 @@ function App() {
           </div>
         );
       })()}
+
+      {visor && <VisorFotos fotos={visor.fotos} indice={visor.indice} onCambiar={(i) => setVisor({ ...visor, indice: i })} onCerrar={() => setVisor(null)} />}
 
       {/* AÑADIR TAREAS A UN DÍA: finca → tarea (se pueden añadir varias) */}
       {nuevoDia && (() => {
