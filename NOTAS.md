@@ -1,5 +1,14 @@
 # Notas de la Pizarra de Tareas
 
+## Cómo está hecha la app (importante para cambiarla)
+- El código está en `src/app.jsx` (pizarra) y `espejo/src/app.jsx` (espejo del encargado).
+- `index.html` y `espejo/index.html` solo cargan Firebase y los archivos ya preparados
+  `app.js` y `app.css`. React va con versión fija en `vendor/`.
+- Después de cambiar cualquier `src/app.jsx`: `npm install` (la primera vez) y `./build.sh`,
+  y subir también `app.js` y `app.css`. Si no, la web no cambia.
+- No subir un `index.html` antiguo de una sola pieza encima: se perderían los cambios.
+- Icono de la pantalla de inicio: `iconos/` y `manifest.webmanifest`.
+
 ## Apps y enlaces
 - **App principal** (Fran y su hermano, pueden modificar): GitHub Pages, `index.html` de este repositorio.
 - **App espejo del encargado** (solo lectura, solo el día de hoy):

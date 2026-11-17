@@ -1,0 +1,10 @@
+{
+  "name": "pizarradetareas",
+  "private": true,
+  "description": "Pizarra de Tareas. El código está en src/app.jsx y espejo/src/app.jsx; ./build.sh genera app.js y app.css.",
+  "scripts": { "build": "./build.sh" },
+  "devDependencies": {
+    "esbuild": "0.24.2",
+    "tailwindcss": "3.4.17"
+  }
+}

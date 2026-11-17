@@ -1,0 +1,323 @@
+const { useState, useEffect } = React;
+
+// --- IDENTIFICADOR DE LA PIZARRA ---
+const APP_ID = "ecologicos-almeria-v1"; 
+
+function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const traducir = (e) => {
+    const c = (e && e.code) || '';
+    if (c.includes('invalid-credential') || c.includes('wrong-password') || c.includes('user-not-found') || c.includes('invalid-email')) return 'Correo o contraseña incorrectos.';
+    if (c.includes('too-many-requests')) return 'Demasiados intentos. Espera unos minutos.';
+    if (c.includes('network')) return 'Sin conexión. Revisa internet.';
+    return 'No se ha podido entrar (' + (c || 'error') + ').';
+  };
+
+  const entrar = async (e) => {
+    e.preventDefault();
+    setBusy(true); setMsg(null);
+    try {
+      await window.FirebaseAPI.signInWithEmailAndPassword(window.FirebaseAPI.auth, email.trim(), password);
+    } catch (err) { setMsg({ ok: false, text: traducir(err) }); }
+    setBusy(false);
+  };
+
+  const recuperar = async () => {
+    if (!email.trim()) { setMsg({ ok: false, text: 'Escribe primero tu correo.' }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      await window.FirebaseAPI.sendPasswordResetEmail(window.FirebaseAPI.auth, email.trim());
+      setMsg({ ok: true, text: 'Te hemos enviado un correo para crear una contraseña nueva. Mira también en spam.' });
+    } catch (err) { setMsg({ ok: false, text: traducir(err) }); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="flex items-center justify-center h-[100dvh] bg-slate-50 p-4">
+      <form onSubmit={entrar} className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6 flex flex-col gap-3">
+        <h1 className="text-xl font-bold text-slate-800 text-center">Tareas de Hoy</h1>
+        <p className="text-sm text-slate-500 text-center mb-2">Entra con tu correo y contraseña</p>
+        <input type="email" autoComplete="username" placeholder="Correo" value={email} onChange={e => setEmail(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-base" required />
+        <input type="password" autoComplete="current-password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-base" required />
+        <button type="submit" disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg py-2">{busy ? 'Entrando…' : 'Entrar'}</button>
+        <button type="button" onClick={recuperar} disabled={busy} className="text-sm text-blue-700 underline">He olvidado mi contraseña</button>
+        {msg && <div className={`text-sm rounded-lg p-2 text-center ${msg.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}>{msg.text}</div>}
+      </form>
+    </div>
+  );
+}
+
+function App() {
+  const [user, setUser] = useState(null);
+  const [fincas, setFincas] = useState([]);
+  const [boardTasks, setBoardTasks] = useState([]);
+  const [workers, setWorkers] = useState([]); 
+  const [loading, setLoading] = useState(true);
+  const [diaHoy, setDiaHoy] = useState(null);
+  const [vista, setVista] = useState('hoy'); // 'hoy' o 'manana'
+
+  
+  const [viewTaskMenu, setViewTaskMenu] = useState(null);
+  const [fbLoaded, setFbLoaded] = useState(!!window.FirebaseAPI);
+  
+  useEffect(() => {
+    if (window.FirebaseAPI) setFbLoaded(true);
+    else {
+      const handleLoad = () => setFbLoaded(true);
+      window.addEventListener('firebase-modules-loaded', handleLoad);
+      return () => window.removeEventListener('firebase-modules-loaded', handleLoad);
+    }
+  }, []);
+
+  // LÓGICA DE DETECCIÓN DEL DÍA DE HOY
+  useEffect(() => {
+    const calculateToday = () => {
+      const today = new Date();
+      let currentDayOfWeek = today.getDay();
+      if (currentDayOfWeek === 0) currentDayOfWeek = 7; // Domingo es 7
+
+      const diasBase = [
+        { id: 'L', name: 'Lunes', index: 1 }, { id: 'M', name: 'Martes', index: 2 },
+        { id: 'X', name: 'Miércoles', index: 3 }, { id: 'J', name: 'Jueves', index: 4 },
+        { id: 'V', name: 'Viernes', index: 5 }, { id: 'S', name: 'Sábado', index: 6 },
+        { id: 'D', name: 'Domingo', index: 7 }
+      ];
+
+      const fecha = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const hoy = diasBase.find(d => d.index === currentDayOfWeek);
+      const manana = new Date(today); manana.setDate(today.getDate() + 1);
+      const idxManana = currentDayOfWeek === 7 ? 1 : currentDayOfWeek + 1;
+      setDiaHoy({
+        hoy: { ...hoy, numeroDia: today.getDate(), fecha: fecha(today) },
+        manana: { ...diasBase.find(d => d.index === idxManana), numeroDia: manana.getDate(), fecha: fecha(manana) },
+      });
+    };
+
+    calculateToday();
+    const interval = setInterval(calculateToday, 3600000); // Revisa cada hora
+    return () => clearInterval(interval);
+  }, []);
+
+  // AUTENTICACIÓN
+  useEffect(() => {
+    if (!fbLoaded) return;
+    const initAuth = async () => {
+      try {
+        const { auth, onAuthStateChanged, signOut } = window.FirebaseAPI;
+        onAuthStateChanged(auth, (currentUser) => {
+          // Las sesiones anónimas antiguas ya no valen: hay que entrar con correo y contraseña
+          if (currentUser && currentUser.isAnonymous) { signOut(auth); return; }
+          setUser(currentUser);
+          if (!currentUser) setLoading(false);
+        });
+      } catch (e) { console.error("Error Auth:", e); setLoading(false); }
+    };
+    initAuth();
+  }, [fbLoaded]);
+
+  // CARGA DE DATOS EN TIEMPO REAL
+  useEffect(() => {
+    if (!user || !window.FirebaseAPI) return;
+    setLoading(true);
+
+    const { db, collection, query, onSnapshot } = window.FirebaseAPI;
+
+    const unsubFincas = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'fincas')), (snapshot) => {
+      const items = [];
+      snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+      setFincas(items.sort((a, b) => a.order - b.order || a.createdAt - b.createdAt));
+    });
+
+    const unsubBoard = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'board')), (snapshot) => {
+      const items = [];
+      snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+      setBoardTasks(items);
+      setLoading(false);
+    });
+
+    const unsubWorkers = onSnapshot(query(collection(db, 'artifacts', APP_ID, 'workers')), (snapshot) => {
+      const items = [];
+      snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+      setWorkers(items.sort((a, b) => a.name.localeCompare(b.name)));
+    });
+
+    return () => { unsubFincas(); unsubBoard(); unsubWorkers(); };
+  }, [user]);
+
+  // Mismo patrón de nombres que la pizarra («Finca 1y2» → «Finca 1 y 2», etiqueta «F1-2»)
+  const nombreFinca = (n) => (n || '?').replace(/\s*y\s*/gi, ' y ').replace(/\s+/g, ' ').trim();
+  const getFincaData = (fincaId) => { const f = fincas.find(f => f.id === fincaId); return f ? { ...f, name: nombreFinca(f.name) } : { name: '?', color: 'bg-gray-100 border-gray-400', handleColor: 'bg-gray-400' }; };
+  const getFincaTag = (fincaName) => 'F' + nombreFinca(fincaName).replace(/^finca\s*/i, '').replace(/ y /g, '-').replace(/\s+/g, '');
+
+  if (!user && !loading) return <LoginScreen />;
+  if (loading) return <div className="flex items-center justify-center h-[100dvh] bg-slate-50 font-bold text-slate-500 text-xl">⏳ Cargando Tareas...</div>;
+
+  // Tareas del día elegido (hoy o mañana), por fecha
+  const dia = diaHoy ? diaHoy[vista] : null;
+  const tareasDelDia = dia ? boardTasks.filter(t => (t.targetDateStr || t.dateString) ? (t.targetDateStr || t.dateString) === dia.fecha : t.dayId === dia.id).sort((a, b) => (a.order || 0) - (b.order || 0)) : [];
+
+  return (
+    <div className="flex flex-col h-[100dvh] overflow-hidden bg-slate-100">
+      
+      {/* CABECERA (Lectura - Tareas de Hoy) */}
+      <header className="bg-white shadow-sm border-b px-4 py-3 flex justify-between items-center shrink-0 z-20 relative">
+        <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
+          {[['hoy', 'Hoy'], ['manana', 'Mañana']].map(([v, texto]) => (
+            <button key={v} onClick={() => setVista(v)}
+              className={`px-4 py-1.5 rounded-lg text-base font-bold ${vista === v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}>
+              {texto}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => { if (confirm('¿Cerrar sesión en este dispositivo?')) window.FirebaseAPI.signOut(window.FirebaseAPI.auth); }} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm text-slate-700" title="Cerrar sesión">
+          🚪
+        </button>
+      </header>
+
+      {/* TABLERO CENTRAL ÚNICO (Ocupa el 100% de la pantalla para ver solo hoy) */}
+      <div className="flex-1 overflow-y-auto p-4 flex justify-center bg-slate-100">
+        {dia && (
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-xl flex flex-col h-full shadow-lg overflow-hidden">
+            
+            {/* Cabecera gigante del Día Actual */}
+            <div className={`border-b p-4 text-center sticky top-0 z-10 shadow-sm ${vista === 'hoy' ? 'border-emerald-200 bg-emerald-100' : 'border-blue-200 bg-blue-100'}`}>
+              <span className="font-black text-3xl text-slate-800">
+                {dia.name} <span className={vista === 'hoy' ? 'text-emerald-700' : 'text-blue-700'}>{dia.numeroDia}</span>
+              </span>
+              <div className={`text-sm font-bold mt-1 uppercase tracking-widest ${vista === 'hoy' ? 'text-emerald-800' : 'text-blue-800'}`}>
+                {vista === 'hoy' ? 'Jornada en curso' : 'Planificación de mañana'}
+              </div>
+            </div>
+            
+            {/* Lista de Tareas de Hoy */}
+            <div className="flex-1 p-3 space-y-3 overflow-y-auto pb-6 bg-slate-50/50">
+              {tareasDelDia.map(task => {
+                const finca = getFincaData(task.fincaId);
+                const hasNotes = task.notes && task.notes.trim().length > 0;
+                const taskWorkers = workers.filter(w => (task.workerIds || []).includes(w.id));
+                const hasStars = task.stars > 0;
+                const fincaEtiqueta = getFincaTag(finca.name);
+
+                return (
+                  <div key={task.id} onClick={() => setViewTaskMenu(task)}
+                    className={`flex flex-col bg-white border-2 ${finca.color.split(' ')[1]} rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-all overflow-hidden active:scale-[0.98]`}
+                  >
+                    <div className="flex items-stretch min-h-[56px]">
+                      <div className={`w-3 ${finca.handleColor} shrink-0`}></div>
+                      <div className="p-3 flex-1 flex flex-col justify-center">
+                         <div className="flex justify-between items-center mb-1.5">
+                           <div className="flex gap-2 items-center">
+                             <span className={`text-xs font-black px-2 py-0.5 rounded bg-white border shadow-sm text-slate-700 ${finca.color.split(' ')[1]}`}>{fincaEtiqueta}</span>
+                           </div>
+                           {hasStars && <span className="text-2xl drop-shadow-[0_2px_4px_rgba(251,191,36,0.9)]">{`⭐`.repeat(task.stars)}</span>}
+                         </div>
+                         <span className="text-base font-bold text-slate-800 leading-tight">{task.description}</span>
+                      </div>
+                    </div>
+                    
+                    {taskWorkers.length > 0 && (
+                      <div className="bg-blue-50/80 border-t border-blue-100 p-2 px-3 flex flex-wrap gap-1.5">
+                        {taskWorkers.map(w => (
+                          <span key={w.id} className="text-xs font-bold bg-blue-600 text-white px-2 py-0.5 rounded shadow-sm">{w.name}</span>
+                        ))}
+                      </div>
+                    )}
+
+                    {hasNotes && (
+                      <div className="bg-yellow-50/80 border-t border-yellow-200 p-2 px-3 text-sm font-medium flex gap-2 items-start text-slate-800">
+                        <span className="opacity-80 mt-0.5">📝</span> <span className="line-clamp-2 leading-tight">{task.notes}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {tareasDelDia.length === 0 && (
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 p-6 text-center">
+                  <span className="text-4xl mb-3">🏖️</span>
+                  <span className="text-lg font-bold text-slate-500">No hay tareas asignadas para {vista === 'hoy' ? 'hoy' : 'mañana'}</span>
+                  <span className="text-sm">{vista === 'hoy' ? 'Aún no se ha planificado esta jornada.' : 'Todavía no está planificado. Vuelve a mirar más tarde.'}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* MODAL DE SOLO LECTURA PARA VER DETALLES DE LA TAREA */}
+      {viewTaskMenu && (() => {
+        const finca = getFincaData(viewTaskMenu.fincaId);
+        const taskWorkers = workers.filter(w => (viewTaskMenu.workerIds || []).includes(w.id));
+        const hasNotes = viewTaskMenu.notes && viewTaskMenu.notes.trim().length > 0;
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setViewTaskMenu(null)}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+              
+              {/* Cabecera */}
+              <div className={`p-4 text-white ${finca.handleColor} flex justify-between items-start`}>
+                <div>
+                  <div className="text-xs font-bold opacity-90 mb-1 tracking-wide uppercase">{finca.name} - {viewTaskMenu.dayId}</div>
+                  <h3 className="font-black text-xl flex items-start gap-2 leading-tight">
+                    <span>{viewTaskMenu.description}</span>
+                  </h3>
+                </div>
+                <button aria-label="Cerrar" onClick={() => setViewTaskMenu(null)} className="text-white text-2xl leading-none bg-black/10 hover:bg-black/20 w-9 h-9 flex items-center justify-center rounded-full transition-colors">✕</button>
+              </div>
+              
+              {/* Cuerpo */}
+              <div className="p-5 flex flex-col gap-4 bg-slate-50">
+                
+                {/* Estrellas */}
+                {viewTaskMenu.stars > 0 && (
+                  <div className="bg-white p-3 rounded-lg border shadow-sm flex items-center gap-2">
+                    <span className="text-sm font-bold text-slate-500 uppercase">Prioridad:</span>
+                    <span className="text-2xl drop-shadow-md">{`⭐`.repeat(viewTaskMenu.stars)}</span>
+                  </div>
+                )}
+
+                {/* Trabajadores (Lista) */}
+                <div className="bg-white p-4 rounded-lg border shadow-sm">
+                  <span className="block text-xs font-bold text-slate-500 uppercase mb-3">👥 Cuadrilla Asignada</span>
+                  {taskWorkers.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {taskWorkers.map(w => (
+                        <div key={w.id} className="bg-blue-100 text-blue-800 border border-border-200 px-3 py-1.5 rounded-md font-bold text-sm shadow-sm flex items-center gap-1.5">
+                          👤 {w.name}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-slate-500 italic">No hay trabajadores asignados.</span>
+                  )}
+                </div>
+
+                {/* Anotaciones */}
+                {hasNotes && (
+                  <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200 shadow-sm">
+                    <span className="block text-xs font-bold text-yellow-700 uppercase mb-2">📝 Anotaciones extra</span>
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap font-medium leading-relaxed">{viewTaskMenu.notes}</p>
+                  </div>
+                )}
+                
+              </div>
+              <div className="p-4 bg-white border-t text-center">
+                <button onClick={() => setViewTaskMenu(null)} className="w-full py-3 bg-slate-200 text-slate-700 rounded-lg font-black text-base hover:bg-slate-300 transition-colors shadow-sm">
+                  Entendido, Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+  
