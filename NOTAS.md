@@ -20,6 +20,9 @@
   Solo las ve su dueño (regla en `firestore.rules`). Se crean con «Para mí» en «＋ Añadir
   tarea»; las no hechas pasan solas al día de hoy. La espejo, los avisos y el envío a la
   app agrícola no las leen (solo usan `board`).
+- Lista personal de tareas por finca: `privadas/{uid}/catalogo` (solo la ve su dueño). Se crea
+  escribiendo una tarea nueva en «＋ Añadir tarea» con «Para mí» activado; sin «Para mí», la
+  tarea nueva va a la lista normal de la finca (`catalog`).
 
 ## Apps y enlaces
 - **App principal** (Fran y su hermano, pueden modificar): GitHub Pages, `index.html` de este repositorio.

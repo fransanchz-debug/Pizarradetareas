@@ -645,9 +645,52 @@ function App() {
   }, [user]);
   const refMia = (id) => window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'privadas', user.uid, 'tareas', id);
   const cambiarMia = (id, cambios) => { if (user) window.FirebaseAPI.updateDoc(refMia(id), cambios); };
+  // Lista personal de tareas de cada finca (solo la ve su dueño): privadas/{uid}/catalogo
+  const [miCatalogo, setMiCatalogo] = useState([]);
+  useEffect(() => {
+    if (!user || !window.FirebaseAPI) return;
+    const { db, collection, query, onSnapshot } = window.FirebaseAPI;
+    return onSnapshot(query(collection(db, 'artifacts', APP_ID, 'privadas', user.uid, 'catalogo')), (snap) => {
+      const items = [];
+      snap.forEach(d => items.push({ ...d.data(), id: d.id, mio: true }));
+      setMiCatalogo(items);
+    });
+  }, [user]);
+  const borrarDeMiCatalogo = (t) => {
+    if (!user || !window.confirm(`¿Quitar «${t.description}» de tu lista personal? (Tus tareas ya creadas no se borran)`)) return;
+    const { db, doc, deleteDoc } = window.FirebaseAPI;
+    deleteDoc(doc(db, 'artifacts', APP_ID, 'privadas', user.uid, 'catalogo', t.id));
+  };
+  const [textoNueva, setTextoNueva] = useState('');
+  // Crea una tarea nueva en la finca (en la lista personal si es «Para mí») y la añade al día.
+  const crearYAnadir = async (fincaId, dia) => {
+    const texto = textoNueva.trim();
+    if (!user || !texto) return;
+    const { db, collection, addDoc } = window.FirebaseAPI;
+    const igual = (x) => x.fincaId === fincaId && normalizar(x.description) === normalizar(texto);
+    let t = (paraMi ? miCatalogo.find(igual) : null) || catalog.find(igual);
+    if (!t) {
+      if (paraMi) {
+        const r = await addDoc(collection(db, 'artifacts', APP_ID, 'privadas', user.uid, 'catalogo'), { fincaId, description: texto, usos: 0, createdAt: Date.now() });
+        t = { id: r.id, fincaId, description: texto, mio: true };
+      } else {
+        const deFinca = catalog.filter(x => x.fincaId === fincaId);
+        const number = deFinca.length ? Math.max(...deFinca.map(x => x.number || 0)) + 1 : 1;
+        const r = await addDoc(collection(db, 'artifacts', APP_ID, 'catalog'), { fincaId, number, description: texto, usos: 1, createdAt: Date.now() });
+        t = { id: r.id, fincaId, number, description: texto };
+      }
+    }
+    if (paraMi) addMiTarea(t, dia); else addBoardTask(t, dia);
+    setAnadidas(prev => [...prev, t.id]);
+    setTextoNueva('');
+  };
+
   const addMiTarea = (catalogTask, dia) => {
     if (!user) return;
-    contarUso(catalogTask.id);
+    if (catalogTask.mio) {
+      const { db, doc, updateDoc, increment } = window.FirebaseAPI;
+      updateDoc(doc(db, 'artifacts', APP_ID, 'privadas', user.uid, 'catalogo', catalogTask.id), { usos: increment(1) });
+    } else contarUso(catalogTask.id);
     const { db, collection, addDoc } = window.FirebaseAPI;
     addDoc(collection(db, 'artifacts', APP_ID, 'privadas', user.uid, 'tareas'), {
       catalogTaskId: catalogTask.id, fincaId: catalogTask.fincaId, number: catalogTask.number || null, description: catalogTask.description,
@@ -832,7 +875,7 @@ function App() {
                   {dia.esProximaSemana && <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">Próx. semana</span>}
                 </div>
                 <div className="flex gap-1.5 mt-1.5">
-                  <button onClick={() => { setNuevoDia(dia); setNuevoFincaId(null); setAnadidas([]); setParaMi(false); }} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs font-bold hover:bg-slate-50">＋ Añadir tarea</button>
+                  <button onClick={() => { setNuevoDia(dia); setNuevoFincaId(null); setAnadidas([]); setParaMi(false); setTextoNueva(''); }} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs font-bold hover:bg-slate-50">＋ Añadir tarea</button>
                   {hayAyer && <button onClick={() => repetirAyer(dia)} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs font-bold hover:bg-slate-50">↻ Repetir día anterior</button>}
                 </div>
               </div>
@@ -1615,7 +1658,10 @@ function App() {
       {/* AÑADIR TAREAS A UN DÍA: finca → tarea (se pueden añadir varias) */}
       {nuevoDia && (() => {
         const fincaSel = nuevoFincaId ? getFincaData(nuevoFincaId) : null;
-        const tareasFinca = nuevoFincaId ? catalog.filter(t => t.fincaId === nuevoFincaId).sort(porUso) : [];
+        const tareasFinca = nuevoFincaId ? [
+          ...(paraMi ? miCatalogo.filter(t => t.fincaId === nuevoFincaId).sort(porUso) : []),
+          ...catalog.filter(t => t.fincaId === nuevoFincaId).sort(porUso)
+        ] : [];
         return (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setNuevoDia(null)}>
             <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[85dvh]" onClick={e => e.stopPropagation()}>
@@ -1643,18 +1689,26 @@ function App() {
               </div>
               <div className="p-3 overflow-y-auto flex-1 space-y-1.5">
                 {!fincaSel && <div className="text-sm text-slate-500 text-center p-4">Elige una finca.</div>}
+                {fincaSel && (
+                  <form onSubmit={e => { e.preventDefault(); crearYAnadir(fincaSel.id, nuevoDia); }} className="flex gap-1.5 mb-1">
+                    <input value={textoNueva} onChange={e => setTextoNueva(e.target.value)} placeholder={paraMi ? '＋ Nueva tarea tuya en esta finca…' : '＋ Nueva tarea en esta finca…'}
+                      className="flex-1 min-w-0 px-3 py-2.5 rounded-lg border border-dashed border-slate-400 text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
+                    <button type="submit" disabled={!textoNueva.trim()} className="px-3 rounded-lg bg-emerald-600 text-white text-sm font-bold disabled:opacity-40 shrink-0">Crear</button>
+                  </form>
+                )}
                 {fincaSel && tareasFinca.map(t => {
                   const veces = anadidas.filter(id => id === t.id).length;
                   return (
                     <button key={t.id} onClick={() => { if (paraMi) addMiTarea(t, nuevoDia); else addBoardTask(t, nuevoDia); setAnadidas([...anadidas, t.id]); }}
                       className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left ${veces ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
                       <span className={`w-1.5 self-stretch rounded-full shrink-0 ${fincaSel.handleColor}`}></span>
-                      <span className="text-sm font-medium text-slate-800 flex-1">{t.description}</span>
+                      <span className="text-sm font-medium text-slate-800 flex-1">{t.mio && <span className="text-xs font-bold text-slate-600 bg-slate-100 px-1.5 rounded mr-1.5">👤</span>}{t.description}</span>
                       {veces > 0 && <span className="text-xs font-bold text-emerald-700 shrink-0">✓ Añadida{veces > 1 ? ` ×${veces}` : ''}</span>}
+                      {t.mio && <span role="button" aria-label="Quitar de tu lista" onClick={e => { e.stopPropagation(); borrarDeMiCatalogo(t); }} className="text-slate-500 text-base leading-none px-1.5 shrink-0">✕</span>}
                     </button>
                   );
                 })}
-                {fincaSel && tareasFinca.length === 0 && <div className="text-sm text-slate-500 text-center p-4">Esta finca no tiene tareas. Créalas con ➕ en «Tareas por fincas».</div>}
+                {fincaSel && tareasFinca.length === 0 && <div className="text-sm text-slate-500 text-center p-4">Esta finca no tiene tareas. Escribe una arriba y pulsa «Crear».</div>}
               </div>
               <div className="p-3 border-t">
                 <button onClick={() => setNuevoDia(null)} className="w-full py-2.5 bg-slate-800 text-white rounded-lg font-bold text-sm">
