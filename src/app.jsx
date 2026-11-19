@@ -674,6 +674,32 @@ function App() {
     setNotasMia(null); setMiTareaId(null);
   };
 
+  // ---- Copiar una tarea de trabajadores a otros días (la original se queda en su día)
+  const [diasCopia, setDiasCopia] = useState([]);
+  const [avisoCopia, setAvisoCopia] = useState(null);
+  useEffect(() => { setDiasCopia([]); setAvisoCopia(null); }, [boardTaskMenu && boardTaskMenu.id]);
+  const copiarTarea = async (t, fechas) => {
+    if (!user || !fechas.length) return;
+    const { db, collection, addDoc } = window.FirebaseAPI;
+    const hechas = [], yaEstaba = [];
+    const base = Date.now();
+    for (const [i, fecha] of fechas.sort().entries()) {
+      const dia = dias.find(d => d.dateString === fecha);
+      if (!dia) continue;
+      const repetida = boardTasks.some(x => (x.targetDateStr || x.dateString) === fecha && x.fincaId === t.fincaId && normalizar(x.description) === normalizar(t.description));
+      if (repetida) { yaEstaba.push(`${dia.id} ${dia.numeroDia}`); continue; }
+      contarUso(t.catalogTaskId);
+      await addDoc(collection(db, 'artifacts', APP_ID, 'board'), {
+        catalogTaskId: t.catalogTaskId || null, fincaId: t.fincaId, number: t.number || null, description: t.description,
+        dayId: dia.id, dateString: fecha, targetDateStr: fecha, notes: t.notes || '', workerIds: t.workerIds || [],
+        stars: t.stars || 0, fotos: t.fotos || [], order: base + i, createdAt: base
+      });
+      hechas.push(`${dia.id} ${dia.numeroDia}`);
+    }
+    setDiasCopia([]);
+    setAvisoCopia([hechas.length ? `✓ Copiada a ${hechas.join(', ')}` : '', yaEstaba.length ? `Ya estaba en ${yaEstaba.join(', ')}` : ''].filter(Boolean).join(' · '));
+  };
+
   // ---- Añadir tareas a un día y repetir el día anterior
   const [nuevoDia, setNuevoDia] = useState(null);
   const [nuevoFincaId, setNuevoFincaId] = useState(null);
@@ -1484,17 +1510,24 @@ function App() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-600 shrink-0">Mover a:</span>
-                  <div className="flex gap-1 flex-1 overflow-x-auto">
-                    {dias.map(dia => (
-                      <button key={dia.id} disabled={boardTaskMenu.dayId === dia.id}
-                        onClick={() => { updateBoardTask(boardTaskMenu.id, { dayId: dia.id, dateString: dia.dateString, targetDateStr: dia.dateString }); cerrarTareaMenu(); }}
-                        className={`shrink-0 min-w-[44px] px-1.5 py-1.5 rounded-md font-bold text-xs border leading-tight ${boardTaskMenu.dayId === dia.id ? 'bg-slate-200 text-slate-500 border-slate-200' : dia.esHoy ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-white text-slate-700 border-slate-300'}`}>
-                        {dia.id}<br />{dia.numeroDia}
-                      </button>
-                    ))}
+                <div className="bg-white p-2.5 rounded-lg border flex flex-col gap-2">
+                  <span className="text-sm font-bold text-slate-700">📋 Copiar a otros días <span className="font-normal text-xs text-slate-500">(esta se queda en su día)</span></span>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {dias.filter(dia => dia.dateString !== fechaEsta).map(dia => {
+                      const elegido = diasCopia.includes(dia.dateString);
+                      return (
+                        <button key={dia.id} onClick={() => setDiasCopia(elegido ? diasCopia.filter(d => d !== dia.dateString) : [...diasCopia, dia.dateString])}
+                          className={`py-1.5 rounded-md font-bold text-xs border leading-tight ${elegido ? 'bg-blue-600 border-blue-600 text-white' : dia.esHoy ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-white text-slate-700 border-slate-300'}`}>
+                          {elegido ? '✓ ' : ''}{dia.id} {dia.numeroDia}
+                        </button>
+                      );
+                    })}
                   </div>
+                  <button disabled={diasCopia.length === 0} onClick={() => copiarTarea(boardTaskMenu, diasCopia)}
+                    className="py-2 rounded-lg bg-slate-800 text-white text-sm font-bold disabled:opacity-40">
+                    {diasCopia.length === 0 ? 'Elige uno o varios días' : `Copiar a ${diasCopia.length === 1 ? '1 día' : `${diasCopia.length} días`}`}
+                  </button>
+                  {avisoCopia && <div className="text-xs font-semibold text-emerald-700">{avisoCopia}</div>}
                 </div>
 
                 <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200">
