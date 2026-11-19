@@ -453,8 +453,9 @@ function App() {
 
   const deleteCatalogTask = async (taskId) => {
     const t = catalog.find(x => x.id === taskId);
-    if (!user || !window.confirm(`¿Seguro que quieres borrar «${t ? t.description : 'esta tarea'}» de la lista de tareas de la finca?`)) return;
+    if (!user || !window.confirm(`¿Seguro que quieres borrar «${t ? t.description : 'esta tarea'}» de la lista de tareas de la finca?`)) return false;
     await window.FirebaseAPI.deleteDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'catalog', taskId));
+    return true;
   };
 
   // Tareas de cada finca ordenadas por uso (las más usadas arriba). «usos» sube cada vez que se pone en un día.
@@ -942,7 +943,7 @@ function App() {
                           <span className="text-slate-500 hidden md:block pl-1 cursor-grab text-xs">☰</span>
                           <span className="text-xs font-medium text-slate-700 truncate select-none">{task.description}</span>
                         </div>
-                        <div className="flex opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <div className="hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                            <button onClick={() => setEditingCatalogTask(task)} className="text-blue-500 hover:bg-blue-50 p-0.5 rounded text-xs">✏️</button>
                            <button onClick={() => deleteCatalogTask(task.id)} className="text-red-500 hover:bg-red-50 p-0.5 rounded text-xs">🗑️</button>
                         </div>
@@ -1652,6 +1653,10 @@ function App() {
                   {dia.id} {dia.numeroDia}{dia.esHoy && <span className="block text-xs font-semibold">hoy</span>}
                 </button>
               ))}
+            </div>
+            <div className="flex gap-2 mt-3 pt-3 border-t border-slate-200">
+              <button onClick={() => { setEditingCatalogTask(touchMenu.item); setTouchMenu(null); }} className="flex-1 py-2 rounded-lg border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">✏️ Editar</button>
+              <button onClick={async () => { if (await deleteCatalogTask(touchMenu.item.id)) setTouchMenu(null); }} className="flex-1 py-2 rounded-lg border border-red-200 bg-white text-sm font-semibold text-red-600 hover:bg-red-50">🗑️ Borrar</button>
             </div>
           </div>
         </div>
