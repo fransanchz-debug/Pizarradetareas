@@ -1653,6 +1653,11 @@ function App() {
                   {dia.id} {dia.numeroDia}{dia.esHoy && <span className="block text-xs font-semibold">hoy</span>}
                 </button>
               ))}
+              {(() => { const hoy = dias.find(d => d.esHoy); return hoy && (
+                <button onClick={() => { addMiTarea(touchMenu.item, hoy); setTouchMenu(null); }} className="py-2 rounded-lg font-bold border-2 border-dashed border-slate-400 bg-white text-slate-800 text-sm leading-tight hover:bg-slate-50">
+                  👤 Mía<span className="block text-xs font-semibold text-slate-500">hoy</span>
+                </button>
+              ); })()}
             </div>
             <div className="flex gap-2 mt-3 pt-3 border-t border-slate-200">
               <button onClick={() => { setEditingCatalogTask(touchMenu.item); setTouchMenu(null); }} className="flex-1 py-2 rounded-lg border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">✏️ Editar</button>
