@@ -105,7 +105,6 @@ function App() {
   const [dias, setDias] = useState([]);
   const [newTaskDesc, setNewTaskDesc] = useState('');
   const [activeFincaForNewTask, setActiveFincaForNewTask] = useState(null);
-  const [reorderingFinca, setReorderingFinca] = useState(null);
   const [draggedTaskId, setDraggedTaskId] = useState(null);
   
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -452,27 +451,23 @@ function App() {
     setEditingCatalogTask(null);
   };
 
-  const moveCatalogTaskOrder = async (fincaId, index, direction) => {
-    if (!user) return;
-    const fincaTasks = catalog.filter(t => t.fincaId === fincaId).sort((a, b) => a.number - b.number);
-    if (index + direction < 0 || index + direction >= fincaTasks.length) return;
-    
-    const current = fincaTasks[index];
-    const swap = fincaTasks[index + direction];
-    
-    const { db, updateDoc, doc } = window.FirebaseAPI;
-    await updateDoc(doc(db, 'artifacts', APP_ID, 'catalog', current.id), { number: swap.number });
-    await updateDoc(doc(db, 'artifacts', APP_ID, 'catalog', swap.id), { number: current.number });
-  };
-
   const deleteCatalogTask = async (taskId) => {
     const t = catalog.find(x => x.id === taskId);
     if (!user || !window.confirm(`¿Seguro que quieres borrar «${t ? t.description : 'esta tarea'}» de la lista de tareas de la finca?`)) return;
     await window.FirebaseAPI.deleteDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'catalog', taskId));
   };
 
+  // Tareas de cada finca ordenadas por uso (las más usadas arriba). «usos» sube cada vez que se pone en un día.
+  const porUso = (a, b) => (b.usos || 0) - (a.usos || 0) || (a.number || 0) - (b.number || 0);
+  const contarUso = (catalogTaskId) => {
+    if (!user || !catalogTaskId || !catalog.some(c => c.id === catalogTaskId)) return;
+    const { db, doc, updateDoc, increment } = window.FirebaseAPI;
+    updateDoc(doc(db, 'artifacts', APP_ID, 'catalog', catalogTaskId), { usos: increment(1) });
+  };
+
   const addBoardTask = async (catalogTask, dia, customOrder = null) => {
     if (!user) return;
+    contarUso(catalogTask.id);
     await window.FirebaseAPI.addDoc(window.FirebaseAPI.collection(window.FirebaseAPI.db, 'artifacts', APP_ID, 'board'), {
       catalogTaskId: catalogTask.id, fincaId: catalogTask.fincaId, number: catalogTask.number, 
       description: catalogTask.description, dayId: dia.id, dateString: dia.dateString, targetDateStr: dia.dateString, notes: '', workerIds: [], stars: 0, order: customOrder !== null ? customOrder : Date.now(), createdAt: Date.now()
@@ -651,6 +646,7 @@ function App() {
   const cambiarMia = (id, cambios) => { if (user) window.FirebaseAPI.updateDoc(refMia(id), cambios); };
   const addMiTarea = (catalogTask, dia) => {
     if (!user) return;
+    contarUso(catalogTask.id);
     const { db, collection, addDoc } = window.FirebaseAPI;
     addDoc(collection(db, 'artifacts', APP_ID, 'privadas', user.uid, 'tareas'), {
       catalogTaskId: catalogTask.id, fincaId: catalogTask.fincaId, number: catalogTask.number || null, description: catalogTask.description,
@@ -689,6 +685,7 @@ function App() {
     if (nuevas.length === 0) { window.alert(`Las tareas del ${etiquetaFecha(fechaAyer)} ya están en el ${etiquetaFecha(dia.dateString)}.`); return; }
     if (!window.confirm(`¿Copiar ${nuevas.length === 1 ? 'la tarea' : `las ${nuevas.length} tareas`} del ${etiquetaFecha(fechaAyer)}, con su cuadrilla, al ${etiquetaFecha(dia.dateString)}?`)) return;
     const base = Date.now();
+    nuevas.forEach(t => contarUso(t.catalogTaskId));
     const { db, collection, addDoc } = window.FirebaseAPI;
     await Promise.all(nuevas.map((t, i) => addDoc(collection(db, 'artifacts', APP_ID, 'board'), {
       catalogTaskId: t.catalogTaskId || null, fincaId: t.fincaId, number: t.number || null, description: t.description,
@@ -913,9 +910,8 @@ function App() {
         
         <div className="flex-1 overflow-x-auto p-2.5 flex gap-3 bg-slate-50/80 items-start">
           {fincas.map(finca => {
-            const tareasFinca = catalog.filter(t => t.fincaId === finca.id).sort((a, b) => a.number - b.number);
+            const tareasFinca = catalog.filter(t => t.fincaId === finca.id).sort(porUso);
             const isAdding = activeFincaForNewTask === finca.id;
-            const isReordering = reorderingFinca === finca.id;
             
             return (
               <div key={finca.id} className={`flex-shrink-0 w-60 rounded-xl border ${finca.color} flex flex-col h-full bg-white shadow-sm overflow-hidden`}>
@@ -923,10 +919,7 @@ function App() {
                 <div className={`p-1.5 font-bold text-sm text-center border-b ${finca.color.split(' ')[1]} flex justify-between items-center bg-white/50 backdrop-blur-sm`}>
                   <span className="drop-shadow-sm ml-1">{nombreFinca(finca.name)}</span>
                   <div className="flex gap-1">
-                    <button onClick={() => { setReorderingFinca(isReordering ? null : finca.id); setActiveFincaForNewTask(null); }} className={`p-1 w-6 h-6 flex items-center justify-center rounded shadow-sm transition-colors text-slate-700 text-xs ${isReordering ? 'bg-amber-200 hover:bg-amber-300' : 'bg-white/60 hover:bg-white'}`} title="Reordenar Tareas">
-                      {isReordering ? '✕' : '🔃'}
-                    </button>
-                    <button onClick={() => { setActiveFincaForNewTask(isAdding ? null : finca.id); setReorderingFinca(null); }} className={`p-1 w-6 h-6 flex items-center justify-center rounded shadow-sm transition-colors text-slate-700 text-xs ${isAdding ? 'bg-red-200 hover:bg-red-300' : 'bg-white/60 hover:bg-white'}`} title="Añadir Tarea">
+                    <button onClick={() => { setActiveFincaForNewTask(isAdding ? null : finca.id); }} className={`p-1 w-6 h-6 flex items-center justify-center rounded shadow-sm transition-colors text-slate-700 text-xs ${isAdding ? 'bg-red-200 hover:bg-red-300' : 'bg-white/60 hover:bg-white'}`} title="Añadir Tarea">
                       {isAdding ? '✕' : '➕'}
                     </button>
                   </div>
@@ -940,25 +933,13 @@ function App() {
                 )}
                 
                 <div className="overflow-y-auto p-1.5 space-y-1 flex-1">
-                  {tareasFinca.map((task, index) => (
-                    isReordering ? (
-                      <div key={task.id} className="flex items-center justify-between p-1 bg-amber-50 rounded border border-amber-200 shadow-sm">
-                        <div className="flex items-center gap-1.5 overflow-hidden flex-1">
-                          <span className={`font-bold text-xs min-w-[18px] py-0.5 text-center rounded text-white shadow-sm ${finca.handleColor}`}>{task.number}</span>
-                          <span className="text-xs font-medium text-slate-700 truncate select-none">{task.description}</span>
-                        </div>
-                        <div className="flex flex-col border-l border-amber-200 pl-1 ml-1 shrink-0">
-                          <button onClick={() => moveCatalogTaskOrder(finca.id, index, -1)} disabled={index === 0} className="text-slate-500 hover:text-slate-800 disabled:opacity-30 leading-none text-xs p-0.5">⬆️</button>
-                          <button onClick={() => moveCatalogTaskOrder(finca.id, index, 1)} disabled={index === tareasFinca.length - 1} className="text-slate-500 hover:text-slate-800 disabled:opacity-30 leading-none text-xs p-0.5">⬇️</button>
-                        </div>
-                      </div>
-                    ) : (
+                  {tareasFinca.map((task) => (
+                    (
                       <div key={task.id} draggable onDragStart={(e) => handleDragStart(e, task, 'catalog')} 
                         className="group flex items-center justify-between p-1 bg-white rounded border shadow-sm cursor-grab active:cursor-grabbing hover:border-slate-400 transition-colors"
                       >
                         <div className="flex items-center gap-1.5 overflow-hidden flex-1" onClick={() => setTouchMenu({source: 'catalog', item: task})}>
                           <span className="text-slate-500 hidden md:block pl-1 cursor-grab text-xs">☰</span>
-                          <span className={`font-bold text-xs min-w-[18px] py-0.5 text-center rounded text-white shadow-sm ${finca.handleColor}`}>{task.number}</span>
                           <span className="text-xs font-medium text-slate-700 truncate select-none">{task.description}</span>
                         </div>
                         <div className="flex opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -1600,7 +1581,7 @@ function App() {
       {/* AÑADIR TAREAS A UN DÍA: finca → tarea (se pueden añadir varias) */}
       {nuevoDia && (() => {
         const fincaSel = nuevoFincaId ? getFincaData(nuevoFincaId) : null;
-        const tareasFinca = nuevoFincaId ? catalog.filter(t => t.fincaId === nuevoFincaId).sort((a, b) => a.number - b.number) : [];
+        const tareasFinca = nuevoFincaId ? catalog.filter(t => t.fincaId === nuevoFincaId).sort(porUso) : [];
         return (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setNuevoDia(null)}>
             <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[85dvh]" onClick={e => e.stopPropagation()}>
@@ -1633,7 +1614,7 @@ function App() {
                   return (
                     <button key={t.id} onClick={() => { if (paraMi) addMiTarea(t, nuevoDia); else addBoardTask(t, nuevoDia); setAnadidas([...anadidas, t.id]); }}
                       className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left ${veces ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
-                      <span className={`font-bold text-xs min-w-[24px] py-0.5 text-center rounded text-white ${fincaSel.handleColor}`}>{t.number}</span>
+                      <span className={`w-1.5 self-stretch rounded-full shrink-0 ${fincaSel.handleColor}`}></span>
                       <span className="text-sm font-medium text-slate-800 flex-1">{t.description}</span>
                       {veces > 0 && <span className="text-xs font-bold text-emerald-700 shrink-0">✓ Añadida{veces > 1 ? ` ×${veces}` : ''}</span>}
                     </button>
@@ -1662,7 +1643,7 @@ function App() {
               <button aria-label="Cerrar" onClick={() => setTouchMenu(null)} className="p-1 bg-slate-100 rounded-full w-9 h-9 flex items-center justify-center">✕</button>
             </div>
             <div className={`mb-3 p-2 rounded border flex gap-2 items-center ${finca.color.replace('-100', '-50')}`}>
-              <span className={`font-bold w-6 h-6 flex items-center justify-center rounded text-white text-xs shadow-sm ${finca.handleColor}`}>{touchMenu.item.number}</span>
+              <span className={`w-1.5 self-stretch rounded-full shrink-0 ${finca.handleColor}`}></span>
               <span className="font-medium text-sm text-slate-800">{touchMenu.item.description}</span>
             </div>
             <div className="grid grid-cols-4 gap-1.5">

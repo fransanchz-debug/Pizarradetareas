@@ -18,7 +18,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getStorage, ref as refArchivo, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
-    import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, setDoc, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, query, setDoc, where, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBZbwfgDCXGimBeZW3VenutlJKm_M-w0Ic",
@@ -114,7 +114,7 @@
 
     window.FirebaseAPI = {
       auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
-      collection, doc, query, where,
+      collection, doc, query, where, increment,
       onSnapshot: trackedOnSnapshot,
       addDoc: trackWrite(addDoc),
       updateDoc: trackWrite(updateDoc),

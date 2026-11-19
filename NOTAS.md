@@ -13,6 +13,9 @@
   US-CENTRAL1 con 5 GB gratis), carpeta `fotos/`. Reglas en `storage.rules`: suben Fran y su
   hermano; las ven ellos y el encargado. En la tarea se guarda la lista `fotos` (url, ruta).
   Al quitar una foto de una tarea no se borra el archivo (puede estar copiada en otra tarea).
+- Tareas de cada finca (catálogo): sin números; ordenadas por uso (campo `usos`, que sube
+  cada vez que la tarea se pone en un día). El contador de partida se calculó el 19/11/2026
+  con todo el histórico. El campo `number` sigue guardado pero ya no se muestra.
 - Tareas personales de Fran y de su hermano: en `privadas/{uid}/tareas` (fuera de `board`).
   Solo las ve su dueño (regla en `firestore.rules`). Se crean con «Para mí» en «＋ Añadir
   tarea»; las no hechas pasan solas al día de hoy. La espejo, los avisos y el envío a la
