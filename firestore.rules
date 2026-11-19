@@ -6,6 +6,7 @@ rules_version = '2';
 // y añadir aquí su identificador (UID).
 // El encargado (app espejo en Netlify) tiene su propia cuenta y SOLO puede LEER
 // las tareas de la pizarra, las fincas y los trabajadores.
+// Las tareas personales de Fran y de su hermano (privadas/{uid}) solo las ve su dueño.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -22,8 +23,14 @@ service cloud.firestore {
       ];
     }
 
-    match /artifacts/ecologicos-almeria-v1/{document=**} {
-      allow read, write: if esUsuarioAutorizado();
+    // Todo lo de la pizarra, salvo las tareas personales (privadas), que van aparte.
+    match /artifacts/ecologicos-almeria-v1/{coleccion}/{resto=**} {
+      allow read, write: if esUsuarioAutorizado() && coleccion != 'privadas';
+    }
+
+    // Tareas personales: cada uno solo ve y cambia las suyas.
+    match /artifacts/ecologicos-almeria-v1/privadas/{uid}/{resto=**} {
+      allow read, write: if esUsuarioAutorizado() && request.auth.uid == uid;
     }
 
     // Solo lectura para el encargado (app espejo)

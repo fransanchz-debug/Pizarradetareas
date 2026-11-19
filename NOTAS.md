@@ -13,6 +13,10 @@
   US-CENTRAL1 con 5 GB gratis), carpeta `fotos/`. Reglas en `storage.rules`: suben Fran y su
   hermano; las ven ellos y el encargado. En la tarea se guarda la lista `fotos` (url, ruta).
   Al quitar una foto de una tarea no se borra el archivo (puede estar copiada en otra tarea).
+- Tareas personales de Fran y de su hermano: en `privadas/{uid}/tareas` (fuera de `board`).
+  Solo las ve su dueño (regla en `firestore.rules`). Se crean con «Para mí» en «＋ Añadir
+  tarea»; las no hechas pasan solas al día de hoy. La espejo, los avisos y el envío a la
+  app agrícola no las leen (solo usan `board`).
 
 ## Apps y enlaces
 - **App principal** (Fran y su hermano, pueden modificar): GitHub Pages, `index.html` de este repositorio.

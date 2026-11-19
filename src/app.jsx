@@ -604,10 +604,9 @@ function App() {
   // ---- Fotos de una tarea
   const [visor, setVisor] = useState(null); // { fotos, indice }
   const [subiendo, setSubiendo] = useState(null); // texto de progreso
-  const anadirFotos = async (archivos) => {
-    if (!boardTaskMenu || !archivos || !archivos.length) return;
-    const id = boardTaskMenu.id;
-    let fotos = [...(boardTaskMenu.fotos || [])];
+  // Sube varias fotos una a una; tras cada una llama a guardar(lista completa de fotos).
+  const subirFotos = async (archivos, fotosIniciales, id, guardar) => {
+    let fotos = [...(fotosIniciales || [])];
     const lista = [...archivos];
     for (let i = 0; i < lista.length; i++) {
       setSubiendo(lista.length > 1 ? `Subiendo foto ${i + 1} de ${lista.length}…` : 'Subiendo foto…');
@@ -616,15 +615,66 @@ function App() {
         const nombre = `${id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jpg`;
         const url = await window.FirebaseAPI.subirFoto(blob, nombre);
         fotos = [...fotos, { url, ruta: 'fotos/' + nombre, ancho, alto }];
-        setBoardTaskMenu(prev => prev && prev.id === id ? { ...prev, fotos } : prev);
-        await updateBoardTask(id, { fotos });
+        await guardar(fotos);
       } catch (e) { console.error('Error al subir la foto:', e); }
     }
     setSubiendo(null);
   };
+  const anadirFotos = async (archivos) => {
+    if (!boardTaskMenu || !archivos || !archivos.length) return;
+    const id = boardTaskMenu.id;
+    await subirFotos(archivos, boardTaskMenu.fotos, id, async (fotos) => {
+      setBoardTaskMenu(prev => prev && prev.id === id ? { ...prev, fotos } : prev);
+      await updateBoardTask(id, { fotos });
+    });
+  };
   const quitarFoto = (indice) => {
     if (!window.confirm('¿Quitar esta foto de la tarea?')) return;
     cambiarTarea({ fotos: (boardTaskMenu.fotos || []).filter((_, i) => i !== indice) });
+  };
+
+  // ---- Tareas personales (privadas/{uid}/tareas): solo las ve su dueño.
+  // No se mezclan con las de los trabajadores: la espejo, los avisos y la app agrícola no las leen.
+  const [misTareas, setMisTareas] = useState([]);
+  const [miTareaId, setMiTareaId] = useState(null);
+  const [paraMi, setParaMi] = useState(false);
+  useEffect(() => {
+    if (!user || !window.FirebaseAPI) return;
+    const { db, collection, query, onSnapshot } = window.FirebaseAPI;
+    return onSnapshot(query(collection(db, 'artifacts', APP_ID, 'privadas', user.uid, 'tareas')), (snap) => {
+      const items = [];
+      snap.forEach(d => items.push({ ...d.data(), id: d.id }));
+      setMisTareas(items);
+    });
+  }, [user]);
+  const refMia = (id) => window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'privadas', user.uid, 'tareas', id);
+  const cambiarMia = (id, cambios) => { if (user) window.FirebaseAPI.updateDoc(refMia(id), cambios); };
+  const addMiTarea = (catalogTask, dia) => {
+    if (!user) return;
+    const { db, collection, addDoc } = window.FirebaseAPI;
+    addDoc(collection(db, 'artifacts', APP_ID, 'privadas', user.uid, 'tareas'), {
+      catalogTaskId: catalogTask.id, fincaId: catalogTask.fincaId, number: catalogTask.number || null, description: catalogTask.description,
+      fecha: dia.dateString, dayId: dia.id, notes: '', fotos: [], hecha: false, order: Date.now(), createdAt: Date.now()
+    });
+  };
+  const quitarMia = async (t) => {
+    if (!user || !window.confirm(`¿Seguro que quieres quitar tu tarea «${t.description}»?`)) return;
+    await window.FirebaseAPI.deleteDoc(refMia(t.id));
+    setMiTareaId(null);
+  };
+  // Las que no están hechas pasan solas al día de hoy.
+  useEffect(() => {
+    const hoy = dias.find(d => d.esHoy);
+    if (!user || !hoy) return;
+    misTareas.filter(t => !t.hecha && t.fecha && t.fecha < hoy.dateString)
+      .forEach(t => cambiarMia(t.id, { fecha: hoy.dateString, dayId: hoy.id, pendienteDesde: t.pendienteDesde || t.fecha }));
+  }, [misTareas, hoyStr]);
+  const notasMiaTimer = useRef(null);
+  const [notasMia, setNotasMia] = useState(null); // { id, texto } mientras se escribe
+  const cerrarMiTarea = () => {
+    clearTimeout(notasMiaTimer.current);
+    if (notasMia) cambiarMia(notasMia.id, { notes: notasMia.texto });
+    setNotasMia(null); setMiTareaId(null);
   };
 
   // ---- Añadir tareas a un día y repetir el día anterior
@@ -700,11 +750,12 @@ function App() {
   // Nombres de finca con el mismo patrón en pantalla («Finca 1y2» → «Finca 1 y 2»; etiqueta «F1-2»).
   // No se cambia lo guardado: la app agrícola reconoce las fincas por su nombre exacto.
   const nombreFinca = (n) => (n || '?').replace(/\s*y\s*/gi, ' y ').replace(/\s+/g, ' ').trim();
-  const hayVentana = !!(visor || boardTaskMenu || touchMenu || nuevoDia || showCalendarModal || showSettingsModal || showHistoryDetailModal || editingCatalogTask || editingFinca);
+  const hayVentana = !!(visor || miTareaId || boardTaskMenu || touchMenu || nuevoDia || showCalendarModal || showSettingsModal || showHistoryDetailModal || editingCatalogTask || editingFinca);
   const cerrarVentanasRef = useRef(null);
   cerrarVentanasRef.current = () => {
     if (visor) { setVisor(null); window.history.pushState({ ventana: true }, ''); return; } // atrás con el visor abierto: cierra solo el visor
     if (boardTaskMenu) cerrarTareaMenu();
+    if (miTareaId) cerrarMiTarea();
     setTouchMenu(null); setNuevoDia(null); setShowHistoryDetailModal(null); setShowCalendarModal(false);
     setSelectedCalendarDate(null); setShowSettingsModal(false); setEditingCatalogTask(null); setEditingFinca(null);
   };
@@ -757,7 +808,7 @@ function App() {
                   {dia.esProximaSemana && <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">Próx. semana</span>}
                 </div>
                 <div className="flex gap-1.5 mt-1.5">
-                  <button onClick={() => { setNuevoDia(dia); setNuevoFincaId(null); setAnadidas([]); }} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs font-bold hover:bg-slate-50">＋ Añadir tarea</button>
+                  <button onClick={() => { setNuevoDia(dia); setNuevoFincaId(null); setAnadidas([]); setParaMi(false); }} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs font-bold hover:bg-slate-50">＋ Añadir tarea</button>
                   {hayAyer && <button onClick={() => repetirAyer(dia)} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs font-bold hover:bg-slate-50">↻ Repetir día anterior</button>}
                 </div>
               </div>
@@ -813,7 +864,40 @@ function App() {
                     </div>
                   );
                 })}
-                {tareasDelDia.length === 0 && <div className="h-full flex items-center justify-center text-slate-500 text-sm p-2 text-center">Sin tareas. Toca «＋ Añadir tarea»{hayAyer ? ' o «↻ Repetir día anterior»' : ''}.</div>}
+                {(() => {
+                  const mias = misTareas.filter(t => t.fecha === dia.dateString).sort((a, b) => (a.hecha ? 1 : 0) - (b.hecha ? 1 : 0) || (a.order || 0) - (b.order || 0));
+                  if (mias.length === 0) return null;
+                  return (
+                    <div className="pt-2 mt-1 border-t-2 border-dashed border-slate-300 space-y-1.5">
+                      <div className="text-xs font-bold text-slate-600 px-1">👤 Mis tareas</div>
+                      {mias.map(t => {
+                        const finca = getFincaData(t.fincaId);
+                        return (
+                          <div key={t.id} data-mia-id={t.id} onClick={() => setMiTareaId(t.id)} className={`flex items-stretch bg-white border-2 border-dashed ${finca.color.split(' ')[1]} rounded-lg cursor-pointer select-none ${t.hecha ? 'opacity-60' : ''}`}>
+                            <button onClick={(e) => { e.stopPropagation(); cambiarMia(t.id, { hecha: !t.hecha, hechaEn: t.hecha ? null : Date.now() }); }} aria-label={t.hecha ? 'Marcar como pendiente' : 'Marcar como hecha'} className="px-2 flex items-center shrink-0">
+                              <span className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-sm font-bold ${t.hecha ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-400 bg-white'}`}>{t.hecha ? '✓' : ''}</span>
+                            </button>
+                            <div className="py-1.5 pr-2 flex-1 min-w-0">
+                              <div className="flex justify-between items-center gap-1">
+                                <span className="flex items-center gap-1">
+                                  <span className={`text-xs font-black px-1.5 rounded bg-white border text-slate-700 ${finca.color.split(' ')[1]}`}>{getFincaTag(finca.name)}</span>
+                                  <span className="text-xs font-bold text-slate-700 bg-slate-100 px-1.5 rounded">👤 Mía</span>
+                                </span>
+                                <span className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
+                                  {(t.fotos || []).length > 0 && <span>📷 {t.fotos.length}</span>}
+                                  {t.notes && t.notes.trim() && <span>📝</span>}
+                                </span>
+                              </div>
+                              <span className={`text-sm font-semibold text-slate-800 leading-tight ${t.hecha ? 'line-through' : ''}`}>{t.description}</span>
+                              {t.pendienteDesde && !t.hecha && <div className="text-xs text-amber-700 font-semibold">Pendiente desde el {etiquetaFecha(t.pendienteDesde)}</div>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                {tareasDelDia.length === 0 && !misTareas.some(t => t.fecha === dia.dateString) && <div className="h-full flex items-center justify-center text-slate-500 text-sm p-2 text-center">Sin tareas. Toca «＋ Añadir tarea»{hayAyer ? ' o «↻ Repetir día anterior»' : ''}.</div>}
                 {tareasDelDia.length > 1 && <div className="text-center text-xs text-slate-500 pt-1">{punteroFino ? 'Arrastra una tarea para cambiar el orden' : 'Mantén pulsada una tarea y arrástrala para cambiar el orden'}</div>}
               </div>
             </div>
@@ -907,7 +991,8 @@ function App() {
         // Recopilar todo el histórico uniendo (historialCompleto || []) y las tareas de hoy en vivo si procede
         const allTasksHistory = [
           ...(historialCompleto || []),
-          ...boardTasks.map(t => ({ ...t, snapshotDate: t.targetDateStr || t.dateString || todayStr }))
+          ...boardTasks.map(t => ({ ...t, snapshotDate: t.targetDateStr || t.dateString || todayStr })),
+          ...misTareas.filter(t => t.hecha).map(t => ({ ...t, snapshotDate: t.fecha, mia: true }))
         ];
 
         // Filtrar tareas según el buscador avanzado
@@ -993,6 +1078,7 @@ function App() {
                                   <div className="flex gap-1.5 items-center">
                                     <span className={`w-2.5 h-2.5 rounded-sm shadow-sm shrink-0 ${finca.handleColor}`}></span>
                                     <span className="font-bold text-slate-800">{finca.name}</span>
+                                    {t.mia && <span className="font-bold text-slate-700 bg-slate-100 px-1.5 rounded">👤 Mía</span>}
                                   </div>
                                   {t.stars > 0 && <span>{'⭐'.repeat(t.stars)}</span>}
                                 </div>
@@ -1051,6 +1137,7 @@ function App() {
                                 <span className={`w-2.5 h-2.5 rounded-sm shadow-sm shrink-0 ${finca.handleColor}`}></span>
                                 <span className="font-bold text-slate-800">{finca.name}</span>
                                 <span className="text-xs font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded ml-1">📅 {formattedDate}</span>
+                                {t.mia && <span className="font-bold text-slate-700 bg-slate-100 px-1.5 rounded">👤 Mía</span>}
                               </div>
                               {t.stars > 0 && <span>{'⭐'.repeat(t.stars)}</span>}
                             </div>
@@ -1442,6 +1529,74 @@ function App() {
 
       {visor && <VisorFotos fotos={visor.fotos} indice={visor.indice} onCambiar={(i) => setVisor({ ...visor, indice: i })} onCerrar={() => setVisor(null)} />}
 
+      {/* TAREA PERSONAL (solo la ve su dueño) */}
+      {miTareaId && (() => {
+        const t = misTareas.find(x => x.id === miTareaId);
+        if (!t) return null;
+        const finca = getFincaData(t.fincaId);
+        const textoNotas = notasMia && notasMia.id === t.id ? notasMia.texto : (t.notes || '');
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center sm:p-4" onClick={cerrarMiTarea}>
+            <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[92dvh]" onClick={e => e.stopPropagation()}>
+              <div className={`p-3 rounded-t-2xl sm:rounded-t-xl border-b-4 border-dashed ${finca.color.split(' ')[1]} bg-slate-50 flex justify-between items-start gap-2`}>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-slate-600 mb-0.5">👤 Tarea personal · {finca.name} · {etiquetaFecha(t.fecha)}</div>
+                  <h3 className="font-black text-lg leading-tight text-slate-800 line-clamp-2">{t.description}</h3>
+                </div>
+                <button onClick={cerrarMiTarea} aria-label="Cerrar" className="text-slate-500 text-2xl leading-none hover:bg-slate-200 w-9 h-9 flex items-center justify-center rounded-full shrink-0">✕</button>
+              </div>
+              <div className="p-3 overflow-y-auto flex-1 bg-slate-50 flex flex-col gap-3">
+                <button onClick={() => cambiarMia(t.id, { hecha: !t.hecha, hechaEn: t.hecha ? null : Date.now() })}
+                  className={`w-full py-3 rounded-lg font-bold text-base border-2 ${t.hecha ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-emerald-600 text-emerald-700'}`}>
+                  {t.hecha ? '✓ Hecha (toca para desmarcar)' : 'Marcar como hecha'}
+                </button>
+                {t.pendienteDesde && !t.hecha && <div className="text-sm text-amber-800 font-semibold">Pendiente desde el {etiquetaFecha(t.pendienteDesde)}</div>}
+                <div className="bg-white p-2 rounded-lg border">
+                  <textarea value={textoNotas} onChange={(e) => { const texto = e.target.value; setNotasMia({ id: t.id, texto }); clearTimeout(notasMiaTimer.current); notasMiaTimer.current = setTimeout(() => cambiarMia(t.id, { notes: texto }), 700); }}
+                    placeholder="📝 Notas para ti..." className="w-full p-2 border border-yellow-200 rounded bg-yellow-50/50 text-sm outline-none focus:ring-2 focus:ring-yellow-400 resize-none h-16" />
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-slate-700">📷 Fotos {(t.fotos || []).length > 0 && <span className="font-semibold text-slate-500">({t.fotos.length})</span>}</span>
+                    <label className={`text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-800 cursor-pointer hover:bg-slate-50 ${subiendo ? 'opacity-50 pointer-events-none' : ''}`}>
+                      ＋ Añadir fotos
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={e => { subirFotos(e.target.files, t.fotos, 'mia_' + t.id, async (fotos) => cambiarMia(t.id, { fotos })); e.target.value = ''; }} />
+                    </label>
+                  </div>
+                  {subiendo && <div className="text-xs font-semibold text-blue-700">⏳ {subiendo}</div>}
+                  {(t.fotos || []).length > 0 && (
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {t.fotos.map((f, i) => (
+                        <div key={f.ruta || f.url} className="relative shrink-0">
+                          <img src={f.url} alt="" loading="lazy" onClick={() => setVisor({ fotos: t.fotos, indice: i })} className="w-20 h-20 object-cover rounded-lg border cursor-pointer bg-slate-100" />
+                          <button onClick={() => { if (window.confirm('¿Quitar esta foto?')) cambiarMia(t.id, { fotos: t.fotos.filter((_, j) => j !== i) }); }} aria-label="Quitar foto" className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-white border border-slate-300 text-slate-600 text-xs leading-none shadow-sm">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-600 shrink-0">Mover a:</span>
+                  <div className="flex gap-1 flex-1 overflow-x-auto">
+                    {dias.map(dia => (
+                      <button key={dia.id} disabled={t.fecha === dia.dateString}
+                        onClick={() => { cambiarMia(t.id, { fecha: dia.dateString, dayId: dia.id }); cerrarMiTarea(); }}
+                        className={`shrink-0 min-w-[44px] px-1.5 py-1.5 rounded-md font-bold text-xs border leading-tight ${t.fecha === dia.dateString ? 'bg-slate-200 text-slate-500 border-slate-200' : dia.esHoy ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-white text-slate-700 border-slate-300'}`}>
+                        {dia.id}<br />{dia.numeroDia}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200">
+                  <span className="text-xs text-slate-500">✓ Se guarda solo · Solo la ves tú</span>
+                  <button onClick={() => quitarMia(t)} className="px-3 py-2 bg-white text-red-600 border border-red-200 rounded-lg font-bold hover:bg-red-50 text-sm">🗑️ Quitar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* AÑADIR TAREAS A UN DÍA: finca → tarea (se pueden añadir varias) */}
       {nuevoDia && (() => {
         const fincaSel = nuevoFincaId ? getFincaData(nuevoFincaId) : null;
@@ -1456,6 +1611,10 @@ function App() {
                 </div>
                 <button onClick={() => setNuevoDia(null)} aria-label="Cerrar" className="text-slate-500 text-2xl leading-none hover:bg-slate-100 w-9 h-9 flex items-center justify-center rounded-full">✕</button>
               </div>
+              <button onClick={() => setParaMi(!paraMi)} className={`mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg border-2 text-left ${paraMi ? 'border-slate-800 bg-slate-800 text-white' : 'border-dashed border-slate-300 bg-white text-slate-700'}`}>
+                <span className={`w-10 h-6 rounded-full relative shrink-0 ${paraMi ? 'bg-emerald-400' : 'bg-slate-300'}`}><span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${paraMi ? 'left-[18px]' : 'left-0.5'}`}></span></span>
+                <span className="text-sm font-bold">👤 Para mí <span className="font-normal text-xs opacity-80">— tarea personal, solo la ves tú</span></span>
+              </button>
               <div className="p-3 flex flex-wrap gap-1.5 border-b bg-slate-50">
                 {fincas.map(f => {
                   const fd = getFincaData(f.id);
@@ -1472,7 +1631,7 @@ function App() {
                 {fincaSel && tareasFinca.map(t => {
                   const veces = anadidas.filter(id => id === t.id).length;
                   return (
-                    <button key={t.id} onClick={() => { addBoardTask(t, nuevoDia); setAnadidas([...anadidas, t.id]); }}
+                    <button key={t.id} onClick={() => { if (paraMi) addMiTarea(t, nuevoDia); else addBoardTask(t, nuevoDia); setAnadidas([...anadidas, t.id]); }}
                       className={`w-full flex items-center gap-2 p-2.5 rounded-lg border text-left ${veces ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
                       <span className={`font-bold text-xs min-w-[24px] py-0.5 text-center rounded text-white ${fincaSel.handleColor}`}>{t.number}</span>
                       <span className="text-sm font-medium text-slate-800 flex-1">{t.description}</span>
