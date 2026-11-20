@@ -11,7 +11,10 @@ service firebase.storage {
       ];
     }
     function encargado() {
-      return request.auth != null && request.auth.uid == 'a3RUHr2UIQVpM2w4eleC8GE7lZ53';
+      return request.auth != null && request.auth.uid in [
+        'a3RUHr2UIQVpM2w4eleC8GE7lZ53', // encargado (Fabio)
+        'zuo3LqOv04NJFIwSbJt7cWpifk82'  // Mory (trabajador)
+      ];
     }
     match /fotos/{archivo} {
       allow read: if autorizado() || encargado();

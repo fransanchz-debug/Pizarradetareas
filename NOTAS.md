@@ -25,6 +25,7 @@
   tarea nueva va a la lista normal de la finca (`catalog`).
 
 ## Apps y enlaces
+Nombres: «pizarra» = app principal (Fran y su hermano); «espejo» = app de solo lectura.
 - **App principal** (Fran y su hermano, pueden modificar): GitHub Pages, `index.html` de este repositorio.
 - **App espejo del encargado** (solo lectura, solo el día de hoy):
   https://fransanchz-debug.github.io/Pizarradetareas/espejo/ — código en `espejo/index.html`.
@@ -35,7 +36,10 @@
 - Desde nov. 2026 se entra con correo y contraseña (Firebase Authentication).
 - Reglas en `firestore.rules`:
   - Fran y su hermano: leer y escribir todo en `artifacts/ecologicos-almeria-v1`.
-  - Encargado: solo leer `board`, `fincas` y `workers`.
+  - Usuarios de la espejo (solo leer `board`, `fincas`, `workers` y las fotos):
+    encargado Fabio y Mory (trabajador, desde el 20/11/2026). Para añadir otro: crear su
+    cuenta en Firebase Authentication y añadir su UID en `esEncargado()` de `firestore.rules`
+    y en `encargado()` de `storage.rules`, y publicar las dos reglas.
   - Nadie más puede leer ni escribir.
 - Para añadir a alguien: crear su cuenta en Firebase > Authentication, añadir su UID
   en `firestore.rules` y publicar las reglas. La persona crea su contraseña con

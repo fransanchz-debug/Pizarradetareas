@@ -4,7 +4,7 @@ rules_version = '2';
 // Solo pueden leer y escribir las cuentas autorizadas (correo y contraseña).
 // Para autorizar a otra persona: crear su cuenta en Firebase > Authentication
 // y añadir aquí su identificador (UID).
-// El encargado (app espejo en Netlify) tiene su propia cuenta y SOLO puede LEER
+// Los usuarios de la espejo (encargado y trabajadores autorizados) tienen su cuenta y SOLO pueden LEER
 // las tareas de la pizarra, las fincas y los trabajadores.
 // Las tareas personales de Fran y de su hermano (privadas/{uid}) solo las ve su dueño.
 service cloud.firestore {
@@ -19,7 +19,8 @@ service cloud.firestore {
 
     function esEncargado() {
       return request.auth != null && request.auth.uid in [
-        'a3RUHr2UIQVpM2w4eleC8GE7lZ53'  // encargado
+        'a3RUHr2UIQVpM2w4eleC8GE7lZ53', // encargado (Fabio)
+        'zuo3LqOv04NJFIwSbJt7cWpifk82'  // Mory (trabajador)
       ];
     }
 
