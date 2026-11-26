@@ -65,7 +65,7 @@ Fran les ha dicho que avisen si las usan. Si hace falta reactivarlas:
 También existen datos de pruebas en `artifacts/ecologicos-almeria-pruebas-aisladas`
 y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa ninguna app.
 
-## Avisos diarios (copia de cuadrilla + Telegram)
+## Avisos diarios (copia de cuadrilla + notificaciones push)
 - Código: `avisos/main.py`. Lo ejecuta **Google Cloud Scheduler** cada 5 minutos
   (trabajo `avisos-pizarra`, zona Europe/Madrid) llamando a la función
   `avisos` (Cloud Run, región europe-west1).
@@ -79,17 +79,26 @@ y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa nin
   las 23:50 (recoge las correcciones de la tarde; no pisa lo ya revisado): quién ha
   estado en qué tarea y finca, con la jornada (entrada, salida, descanso) para
   crear los partes de horas (función `recibir-pizarra` de gestion-agricola).
-  Si no reconoce trabajadores o fincas, avisa por Telegram. Las faltas
+  Si no reconoce trabajadores o fincas, avisa con una notificación. Las faltas
   apuntadas en la app agrícola no salen como "sin tarea" y no se copian.
   Clave: Secret Manager `GESTION_AGRICOLA_CLAVE` (copia en un documento de Drive de Fran).
 - Todo se ajusta en la app: Ajustes > Avisos (se guarda en `config/general`).
 - Cuenta técnica: `pizarra-avisos@pizarra-de-tareas-semanales.iam.gserviceaccount.com`
   (lee/escribe Firestore, lee la clave del bot). GitHub también puede usarla sin
   contraseñas (Workload Identity Federation, solo este repositorio).
-- Clave del bot (@PizarraEcologicosbot): en Google Secret Manager
-  `TELEGRAM_BOT_TOKEN` (la usa la función) y en GitHub > Settings > Secrets >
-  Actions `TELEGRAM_BOT_TOKEN` (para lanzarlo a mano). Si se cambia, cambiarla en los dos.
-- Cada uno conecta su Telegram en Ajustes > Avisos > «Conectar mi Telegram».
+- **Notificaciones push** (Web Push estándar con claves VAPID; sustituyeron a Telegram el 26/11/2026):
+  cada aparato (móvil/ordenador) se activa por separado en Ajustes > Avisos > «Activar notificaciones».
+  La app guarda la suscripción en `avisos/{uid}.subs` (endpoint + claves + `confirmada` + `aparato`); la función
+  `avisos` (pywebpush) envía el aviso, manda uno de bienvenida a los aparatos nuevos (en <5 min) y **quita
+  solos los aparatos caducados** (error 404/410). El trabajador de fondo que las muestra es `sw.js` (raíz).
+  Clave pública VAPID: constante `VAPID_PUBLICA` en `src/app.jsx`. Clave privada: solo en Secret Manager
+  `VAPID_PRIVATE_KEY` (la función la lee como secreto; el flujo de GitHub, de Secret Manager). Firma moderna
+  (`Vapid02`, RFC 8292): **Apple la exige**. El contacto de la firma (`VAPID_SUB` en `avisos/main.py`) es
+  genérico a propósito; si un servicio lo rechazara (403 en los registros), cambiarlo ahí.
+  En iPhone solo funcionan con la pizarra **instalada en la pantalla de inicio** (iOS 16.4 o más).
+  Prueba sin móvil: `pruebas/probar_push.py` (servicio falso + descifrado) y `pruebas/t12.js` (pantalla).
+- Telegram: **retirado** (la app y la función ya no lo usan). Quedan sin uso, y se pueden borrar: el secreto
+  `TELEGRAM_BOT_TOKEN` (Secret Manager y GitHub Actions) y el bot @PizarraEcologicosbot (con @BotFather: /deletebot).
 - Prueba manual: GitHub > Actions > «Avisos diarios» > Run workflow (marcar «forzar»
   para la emergencia o «recordatorio» para el de la noche).
 - Facturación: proyecto en plan Blaze, cuenta «Mi cuenta de facturación 1».

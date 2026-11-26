@@ -2,7 +2,7 @@ const { chromium, devices } = require('playwright');
 const fs = require('fs'), path = require('path');
 const REPO = process.env.REPO || path.join(__dirname, '..'), F = path.join(__dirname, 'fake') + '/';
 const tipos = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
-module.exports = async function (fn, { movil = true, ruta = '/', ancho = 1366 } = {}) {
+module.exports = async function (fn, { movil = true, ruta = '/', ancho = 1366, init = null } = {}) {
   const b = await chromium.launch();
   const ctx = await b.newContext(movil ? { ...devices['iPhone 13'], locale: 'es-ES', timezoneId: 'Europe/Madrid' } : { viewport: { width: ancho, height: 800 }, locale: 'es-ES', timezoneId: 'Europe/Madrid' });
   await ctx.route('**/*', async r => {
@@ -18,6 +18,7 @@ module.exports = async function (fn, { movil = true, ruta = '/', ancho = 1366 } 
     return r.abort();
   });
   const p = await ctx.newPage(); const errs = [];
+  if (init) await p.addInitScript(init);
   if (process.env.FECHA) await p.clock.setFixedTime(new Date(process.env.FECHA));
   p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !m.text().includes('Failed to load')) errs.push(m.text()); });
   p.on('dialog', d => { console.log('DIALOGO:', d.message()); d.accept(); });

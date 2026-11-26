@@ -93,6 +93,15 @@ function VisorFotos({ fotos, indice, onCambiar, onCerrar }) {
   );
 }
 
+// Clave pública de las notificaciones (la privada está solo en Google Secret Manager).
+const VAPID_PUBLICA = "BAh47kyd20EM3ia-K5WnVTT6xlRLoI4lHCJbq744AtAK9iVGoHX8Xm8F-BoR59JJLFu_xXLziz-7Y3jxXKGSN6E";
+const clavePush = (b64) => {
+  const raw = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+};
+const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const appInstalada = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
 function App() {
   const [user, setUser] = useState(null);
   const [fincas, setFincas] = useState([]);
@@ -372,14 +381,56 @@ function App() {
     setAvisosEdit({});
   };
 
-  const conectarTelegram = async () => {
-    if (!avisosConfig.botUsername) return;
-    const bytes = new Uint8Array(9);
-    crypto.getRandomValues(bytes);
-    const code = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
-    const { db, setDoc, doc } = window.FirebaseAPI;
-    await setDoc(doc(db, 'artifacts', APP_ID, 'avisos', user.uid), { code, email: user.email || '', chatId: null, pedidoEn: Date.now() }, { merge: true });
-    window.open(`https://t.me/${avisosConfig.botUsername}?start=${code}`, '_blank');
+  // ---- Notificaciones push de ESTE aparato (cada móvil/ordenador se activa por separado)
+  const [pushEstado, setPushEstado] = useState('cargando'); // cargando | activo | inactivo | instalar | denegado | noSoportado
+  const [pushOcupado, setPushOcupado] = useState(false);
+  const [pushError, setPushError] = useState(null);
+  const comprobarPush = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      setPushEstado(esIOS() && !appInstalada() ? 'instalar' : 'noSoportado'); return;
+    }
+    if (Notification.permission === 'denied') { setPushEstado('denegado'); return; }
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      const guardada = sub && ((miAviso && miAviso.subs) || []).some(x => x.endpoint === sub.endpoint);
+      setPushEstado(guardada ? 'activo' : 'inactivo');
+    } catch (e) { setPushEstado('inactivo'); }
+  };
+  useEffect(() => { if (showSettingsModal && settingsTab === 'avisos') comprobarPush(); }, [showSettingsModal, settingsTab, miAviso]);
+  const activarPush = async () => {
+    setPushOcupado(true); setPushError(null);
+    try {
+      const permiso = await Notification.requestPermission(); // debe ser lo primero: iPhone lo exige al tocar el botón
+      if (permiso !== 'granted') { setPushEstado(permiso === 'denied' ? 'denegado' : 'inactivo'); return; }
+      const reg = await navigator.serviceWorker.register('sw.js');
+      await navigator.serviceWorker.ready;
+      const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: clavePush(VAPID_PUBLICA) });
+      const j = sub.toJSON();
+      const otras = ((miAviso && miAviso.subs) || []).filter(x => x.endpoint !== j.endpoint);
+      const aparato = esIOS() ? 'iPhone/iPad' : /android/i.test(navigator.userAgent) ? 'Android' : 'Ordenador';
+      const { db, setDoc, doc } = window.FirebaseAPI;
+      await setDoc(doc(db, 'artifacts', APP_ID, 'avisos', user.uid), { subs: [...otras, { endpoint: j.endpoint, keys: j.keys, creada: Date.now(), confirmada: false, aparato }] }, { merge: true });
+      setPushEstado('activo');
+    } catch (e) {
+      console.error('Error al activar las notificaciones:', e);
+      setPushError('No se han podido activar. Comprueba la conexión y vuelve a intentarlo.');
+    } finally { setPushOcupado(false); }
+  };
+  const desactivarPush = async () => {
+    setPushOcupado(true); setPushError(null);
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (sub) {
+        const endpoint = sub.endpoint;
+        await sub.unsubscribe();
+        const { db, setDoc, doc } = window.FirebaseAPI;
+        await setDoc(doc(db, 'artifacts', APP_ID, 'avisos', user.uid), { subs: ((miAviso && miAviso.subs) || []).filter(x => x.endpoint !== endpoint) }, { merge: true });
+      }
+      setPushEstado('inactivo');
+    } catch (e) { setPushError('No se han podido desactivar.'); }
+    finally { setPushOcupado(false); }
   };
 
   const saveFinca = async (e) => {
@@ -1381,6 +1432,24 @@ function App() {
                 const hayCambios = Object.keys(avisosEdit).length > 0;
                 return (
                   <div className="space-y-3">
+                    <div className="bg-white p-3 rounded-lg border shadow-sm space-y-2">
+                      <h3 className="font-bold text-sm text-slate-800">🔔 Notificaciones en este aparato</h3>
+                      {pushEstado === 'cargando' && <p className="text-xs text-slate-500">Comprobando…</p>}
+                      {pushEstado === 'activo' && <>
+                        <p className="text-xs text-emerald-700 font-bold">✅ Activadas. Te llegarán los avisos aunque la app esté cerrada.</p>
+                        {((miAviso && miAviso.subs) || []).some(x => !x.confirmada) && <p className="text-xs text-amber-700">⏳ En menos de 5 minutos te llegará un aviso de confirmación.</p>}
+                        <button onClick={desactivarPush} disabled={pushOcupado} className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50">Desactivar en este aparato</button>
+                      </>}
+                      {pushEstado === 'inactivo' && <>
+                        <p className="text-xs text-slate-500">Pulsa el botón y acepta el permiso. Cada móvil u ordenador se activa por separado.</p>
+                        <button onClick={activarPush} disabled={pushOcupado} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-3 py-2 rounded-lg">{pushOcupado ? 'Activando…' : 'Activar notificaciones'}</button>
+                      </>}
+                      {pushEstado === 'instalar' && <p className="text-xs text-slate-700">En el iPhone hay que instalar antes la pizarra: en Safari pulsa <b>Compartir</b> (⬆️), elige <b>«Añadir a pantalla de inicio»</b>, ábrela desde su icono y vuelve aquí.</p>}
+                      {pushEstado === 'denegado' && <p className="text-xs text-slate-700">Las notificaciones están bloqueadas para esta página. Actívalas en los ajustes del móvil: <b>iPhone</b> → Ajustes → Notificaciones → Pizarra; <b>Android</b> → ⋮ del navegador → Ajustes del sitio → Notificaciones.</p>}
+                      {pushEstado === 'noSoportado' && <p className="text-xs text-slate-700">Este navegador no admite notificaciones. Prueba con Chrome, o instala la pizarra en la pantalla de inicio.</p>}
+                      {pushError && <p className="text-xs text-red-700 font-semibold">{pushError}</p>}
+                      {((miAviso && miAviso.subs) || []).length > 0 && <p className="text-xs text-slate-500">Aparatos con avisos: {miAviso.subs.map(x => x.aparato || 'aparato').join(', ')}</p>}
+                    </div>
                     <div className="bg-white p-3 rounded-lg border shadow-sm space-y-3">
                       <div>
                         <h3 className="font-bold text-sm text-slate-800">🕗 Jornada</h3>
@@ -1409,20 +1478,6 @@ function App() {
                         {hayCambios && <button onClick={() => setAvisosEdit({})} className="text-xs text-slate-500 underline">Deshacer</button>}
                       </div>
                       <p className="text-xs text-slate-500">Los avisos pueden llegar hasta 5 minutos después de su hora.</p>
-                    </div>
-                    <div className="bg-white p-3 rounded-lg border shadow-sm space-y-2">
-                      <h3 className="font-bold text-sm text-slate-800">📲 Mi Telegram</h3>
-                      {!avisosConfig.botUsername ? (
-                        <p className="text-xs text-slate-500">El bot de Telegram todavía no está configurado.</p>
-                      ) : miAviso && miAviso.chatId ? (
-                        <p className="text-xs text-emerald-700 font-bold">✅ Conectado. Te llegarán los avisos a tu Telegram.</p>
-                      ) : (
-                        <>
-                          <p className="text-xs text-slate-500">Pulsa el botón, se abrirá Telegram: dale a <b>Iniciar</b>. La conexión se confirma en unos 5 minutos.</p>
-                          <button onClick={conectarTelegram} className="bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs px-3 py-2 rounded-lg">Conectar mi Telegram</button>
-                          {miAviso && miAviso.code && <p className="text-xs text-amber-700">⏳ Pendiente de confirmar…</p>}
-                        </>
-                      )}
                     </div>
                   </div>
                 );

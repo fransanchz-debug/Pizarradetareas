@@ -3,14 +3,14 @@
 Lo ejecuta Google Cloud Scheduler cada 5 minutos (función de Cloud Run "avisos").
 También se puede lanzar a mano desde GitHub Actions (.github/workflows/avisos.yml).
 
-1. Conecta los Telegram de Fran y su hermano (mensajes "/start <código>" que
-   genera la app en Ajustes > Avisos).
+1. Confirma los dispositivos nuevos (notificaciones push que cada uno activa en
+   Ajustes > Avisos de la app) con un primer aviso.
 2. 🌙 Recordatorio (22:00 por defecto): cómo está planificado el día siguiente.
    Solo informa.
 3. 🚨 Emergencia, unos minutos antes de la entrada (45 por defecto), una vez al día:
    - En las tareas de hoy sin trabajadores, copia la cuadrilla de la misma
      tarea (misma finca y mismo nombre) del día anterior.
-   - Avisa por Telegram de lo copiado y de los trabajadores sin tarea hoy.
+   - Avisa (notificación push) de lo copiado y de los trabajadores sin tarea hoy.
 
 4. 📤 Al terminar la jornada (15 min después de la salida) y otra vez a las
    23:50 (por si se corrige algo por la noche), envía a la app agrícola quién ha estado en qué tarea y finca, para los partes de horas.
@@ -19,9 +19,12 @@ También se puede lanzar a mano desde GitHub Actions (.github/workflows/avisos.y
 El repositorio es público: no se escriben nombres ni datos en el registro.
 """
 
+import base64
 import datetime as dt
 import html
+import json
 import os
+import re
 import sys
 import unicodedata
 from zoneinfo import ZoneInfo
@@ -29,6 +32,8 @@ from zoneinfo import ZoneInfo
 import google.auth
 import google.auth.transport.requests
 import requests
+from py_vapid import Vapid02  # firma moderna (RFC 8292): la exige Apple (iPhone)
+from pywebpush import WebPushException, webpush
 
 PROJECT = "pizarra-de-tareas-semanales"
 APP_ID = "ecologicos-almeria-v1"
@@ -40,20 +45,23 @@ MINUTOS_ANTES_DEFECTO = 45
 # Si GitHub se retrasa mucho, no mandar un aviso pasado este margen tras la entrada.
 MARGEN_MAXIMO = dt.timedelta(hours=3)
 
-# Solo se conectan a Telegram estas cuentas (las mismas de firestore.rules).
+# Solo reciben avisos estas cuentas (las mismas de firestore.rules).
 CUENTAS_AVISOS = {
     "seq3CISgWIdOMnRGH2QAXvSHDyw1",  # Fran
     "LHagvsoFmJU9jHOV9TilSCY81r92",  # hermano de Fran
 }
 
-TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+PROYECTO_NUM = "669734412138"
+URL_APP = "https://fransanchz-debug.github.io/Pizarradetareas/"
+# Contacto que exige el estándar de las notificaciones. Genérico a propósito: no se envían datos personales a
+# Apple/Google. Si algún día un servicio lo rechaza (error 403 en los registros), cambiarlo aquí.
+VAPID_SUB = "mailto:avisos@pizarra-tareas.invalid"
 AGRI_URL = "https://pykqyjynvtgstqzgnilu.supabase.co/functions/v1/recibir-pizarra"
 AGRI_KEY = os.environ.get("GESTION_AGRICOLA_CLAVE", "").strip()
 HORA_SALIDA_DEFECTO = "17:00"
 DESCANSO_DEFECTO = 30
 MINUTOS_TRAS_SALIDA = 15
 HORA_ENVIO_NOCHE = "23:50"  # segundo envío del día, con las correcciones de la tarde
-TG = f"https://api.telegram.org/bot{TG_TOKEN}"
 
 
 # ---------- Firestore (REST) ----------
@@ -136,45 +144,69 @@ def actualizar_doc(s, ruta, campos):
     r.raise_for_status()
 
 
-# ---------- Telegram ----------
+# ---------- Notificaciones push (Web Push + VAPID) ----------
 
-def tg(metodo, **datos):
-    r = requests.post(f"{TG}/{metodo}", json=datos, timeout=30)
-    j = r.json()
-    if not j.get("ok"):
-        raise RuntimeError(f"Telegram {metodo}: {j.get('description')}")
-    return j["result"]
+_vapid = None
 
 
-def conectar_telegram(s, config):
-    """Guarda el chat de quien ha pulsado 'Iniciar' con un código válido de la app."""
-    yo = tg("getMe")
-    if config.get("botUsername") != yo["username"]:
-        actualizar_doc(s, "config/general", {"botUsername": yo["username"]})
+def vapid():
+    """Clave privada de las notificaciones: de la función (secreto) o, si se lanza a mano, de Secret Manager."""
+    global _vapid
+    if _vapid is None:
+        pem = os.environ.get("VAPID_PRIVATE_KEY", "")
+        if not pem:
+            creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+            creds.refresh(google.auth.transport.requests.Request())
+            r = requests.get(
+                f"https://secretmanager.googleapis.com/v1/projects/{PROYECTO_NUM}/secrets/VAPID_PRIVATE_KEY/versions/latest:access",
+                headers={"Authorization": "Bearer " + creds.token}, timeout=30)
+            r.raise_for_status()
+            pem = base64.b64decode(r.json()["payload"]["data"]).decode()
+        _vapid = Vapid02.from_pem(pem.encode())
+    return _vapid
 
-    offset = int(config.get("telegramOffset") or 0)
-    updates = tg("getUpdates", offset=offset, timeout=0, allowed_updates=["message"])
-    if not updates:
-        return
-    pendientes = {
-        a["code"]: a for a in leer_coleccion(s, "avisos")
-        if a.get("code") and a["id"] in CUENTAS_AVISOS
-    }
-    for u in updates:
-        msg = u.get("message") or {}
-        texto = (msg.get("text") or "").strip()
-        chat = (msg.get("chat") or {}).get("id")
-        if not texto.startswith("/start") or not chat:
+
+def aviso_push(sub, titulo, cuerpo, etiqueta, urgente=False):
+    datos = json.dumps({"titulo": titulo, "cuerpo": cuerpo, "etiqueta": etiqueta, "url": URL_APP}, ensure_ascii=False)
+    webpush(
+        subscription_info={"endpoint": sub["endpoint"], "keys": sub["keys"]},
+        data=datos, vapid_private_key=vapid(), vapid_claims={"sub": VAPID_SUB},  # claims nuevo en cada envío
+        ttl=7200 if urgente else 21600, timeout=20, headers={"Urgency": "high" if urgente else "normal"})
+
+
+def estado_envio(e):
+    """'caducado' si el aparato ya no existe (404/410); si no, el código o None."""
+    codigo = getattr(getattr(e, "response", None), "status_code", None)
+    return "caducado" if codigo in (404, 410) else codigo
+
+
+def partir(texto):
+    """Mensaje con marcas <b> -> (título, cuerpo): la primera línea es el título."""
+    limpio = html.unescape(re.sub(r"</?b>", "", texto))
+    lineas = [l.rstrip() for l in limpio.split("\n")]
+    return lineas[0].strip(), "\n".join(lineas[1:]).strip()
+
+
+def confirmar_nuevos(s):
+    """Primer aviso a cada aparato recién activado (y limpia los que ya no existen)."""
+    for a in leer_coleccion(s, "avisos"):
+        subs = a.get("subs") or []
+        if a["id"] not in CUENTAS_AVISOS or all(x.get("confirmada") for x in subs):
             continue
-        code = texto[len("/start"):].strip()
-        aviso = pendientes.get(code)
-        if aviso:
-            actualizar_doc(s, f"avisos/{aviso['id']}", {"chatId": chat, "code": None})
-            tg("sendMessage", chat_id=chat, text="✅ Listo. Aquí te llegarán los avisos de la Pizarra de Tareas.")
-            print("Telegram conectado para una cuenta.")
-        else:
-            tg("sendMessage", chat_id=chat, text="Para conectarte usa el botón «Conectar mi Telegram» en Ajustes > Avisos de la app.")
-    actualizar_doc(s, "config/general", {"telegramOffset": updates[-1]["update_id"] + 1})
+        nuevas = []
+        for sub in subs:
+            if not sub.get("confirmada"):
+                try:
+                    aviso_push(sub, "✅ Notificaciones activadas", "Aquí te llegarán los avisos de la pizarra.", "activadas")
+                    sub = {**sub, "confirmada": True}
+                except Exception as e:
+                    estado = estado_envio(e)
+                    if estado == "caducado":
+                        print("Aparato caducado: se quita.")
+                        continue
+                    print(f"No se pudo confirmar un aparato ({estado or type(e).__name__}); se reintentará.")
+            nuevas.append(sub)
+        actualizar_doc(s, f"avisos/{a['id']}", {"subs": nuevas})
 
 
 # ---------- Cuadrillas ----------
@@ -293,12 +325,28 @@ class Datos:
         return [f"\n🏠 <b>Faltan{hoy}:</b> " + html.escape(texto)]
 
 
-def enviar(s, texto):
+def enviar(s, texto, etiqueta="aviso", urgente=False):
+    """Manda el mensaje a todos los aparatos de Fran y su hermano; quita los que ya no existen."""
+    titulo, cuerpo = partir(texto)
     enviados = 0
     for a in leer_coleccion(s, "avisos"):
-        if a["id"] in CUENTAS_AVISOS and a.get("chatId"):
-            tg("sendMessage", chat_id=a["chatId"], text=texto, parse_mode="HTML")
-            enviados += 1
+        subs = a.get("subs") or []
+        if a["id"] not in CUENTAS_AVISOS or not subs:
+            continue
+        vivas = []
+        for sub in subs:
+            try:
+                aviso_push(sub, titulo, cuerpo, etiqueta, urgente)
+                enviados += 1
+            except Exception as e:
+                estado = estado_envio(e)
+                if estado == "caducado":
+                    print("Aparato caducado: se quita.")
+                    continue
+                print(f"No se pudo enviar a un aparato ({estado or type(e).__name__}).")
+            vivas.append(sub)
+        if len(vivas) != len(subs):
+            actualizar_doc(s, f"avisos/{a['id']}", {"subs": vivas})
     print(f"Avisos enviados: {enviados}.")
 
 
@@ -329,7 +377,7 @@ def recordatorio(s, dia):
         lineas += d.lineas_faltas(faltan)
         if not copias and not sin_cuadrilla and not sin_tarea:
             lineas.append("\n✅ Todo asignado.")
-    enviar(s, "\n".join(lineas))
+    enviar(s, "\n".join(lineas), "recordatorio")
 
 
 def emergencia(s, dia):
@@ -363,7 +411,7 @@ def emergencia(s, dia):
     if sin_tarea:
         lineas.append("\n⚠️ <b>Sin tarea asignada hoy:</b> " + html.escape(", ".join(sin_tarea)))
     lineas += d.lineas_faltas(faltan, " hoy")
-    enviar(s, "\n".join(lineas))
+    enviar(s, "\n".join(lineas), "emergencia", urgente=True)
 
 
 def jornada(config):
@@ -415,21 +463,17 @@ def enviar_agricola(s, config, dia):
     if res.get("fincas_sin_cultivo_ese_dia"):
         problemas.append("📅 <b>Fincas sin cultivo en curso ese día:</b> " + html.escape(", ".join(map(str, res["fincas_sin_cultivo_ese_dia"]))))
     if problemas:
-        enviar(s, f"📤 <b>Horas del {DIAS[dia.weekday()]} {dia.day} enviadas a la app agrícola</b>, pero hay que revisar:\n\n" + "\n".join(problemas))
+        enviar(s, f"📤 <b>Horas del {DIAS[dia.weekday()]} {dia.day} enviadas a la app agrícola</b>, pero hay que revisar:\n\n" + "\n".join(problemas), "agricola")
 
 
 def main(forzar_emergencia=False, forzar_recordatorio=False, forzar_envio=False):
     s = sesion()
     config = leer_doc(s, "config/general") or {}
 
-    if not TG_TOKEN:
-        print("Falta el secreto TELEGRAM_BOT_TOKEN: no se hace nada hasta configurarlo.")
-        return
-    conectar_telegram(s, config)
-    config = leer_doc(s, "config/general") or {}
-    if not any(a.get("chatId") for a in leer_coleccion(s, "avisos") if a["id"] in CUENTAS_AVISOS):
-        print("Nadie ha conectado su Telegram todavía: no se hace nada.")
-        return
+    try:
+        confirmar_nuevos(s)  # primer aviso a los aparatos recién activados
+    except Exception as e:  # un fallo aquí no debe parar la copia de cuadrillas ni el envío de horas
+        print(f"No se pudieron confirmar aparatos nuevos: {type(e).__name__}")
 
     ahora = dt.datetime.now(TZ)
     hoy = ahora.date().isoformat()
@@ -454,7 +498,7 @@ def main(forzar_emergencia=False, forzar_recordatorio=False, forzar_envio=False)
             except Exception as e:
                 print(f"Error al enviar a la app agrícola: {type(e).__name__}")
                 if config.get("errorEnvioAgricola") != hoy:  # avisar una sola vez al día
-                    enviar(s, "⚠️ No se han podido enviar hoy las horas a la app agrícola. Se sigue reintentando cada 5 minutos.")
+                    enviar(s, "⚠️ No se han podido enviar hoy las horas a la app agrícola. Se sigue reintentando cada 5 minutos.", "error-agricola")
                     actualizar_doc(s, "config/general", {"errorEnvioAgricola": hoy})
                 raise
             actualizar_doc(s, "config/general", {clave: hoy})

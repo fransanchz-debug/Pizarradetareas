@@ -4,3 +4,5 @@ node_modules/
 pruebas/datos-reales*.json
 pruebas/foto_grande.jpg
 pruebas/*.png
+__pycache__/
+*.pyc

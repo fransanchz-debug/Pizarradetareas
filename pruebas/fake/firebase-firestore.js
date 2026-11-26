@@ -14,7 +14,7 @@ export const onSnapshot = (ref, cb) => {
       const items = filas.map(d => { const { id, ...rest } = d; return { id, data: () => rest }; });
       cb({ forEach: f => items.forEach(f), size: items.length });
     } else {
-      const v = ref.col === 'config' ? conf[ref.id] : ref.col === 'avisos' ? avisos[ref.id] : null;
+      const v = ref.col === 'config' ? conf[ref.id] : ref.col === 'avisos' ? (window.__avisos !== undefined ? window.__avisos : avisos[ref.id]) : null;
       cb({ exists: () => !!v, data: () => v });
     }
   }, 100);

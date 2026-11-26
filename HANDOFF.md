@@ -9,7 +9,7 @@ Todo el repositorio puede ser público: **aquí no hay (ni debe haber) contrase�
   Firebase ni código. Habla **español**. Usa sobre todo el **iPhone** (la app es de móvil primero) y un PC con Windows.
 - **No le mandes hacer lo que puedes hacer tú.** Ha dicho: «estoy harto de copiar y pegar… quiero que trabajes tú».
   Haz tú los pasos (Firebase, Google Cloud, GitHub, reglas, despliegues) y pídele solo lo que solo él puede hacer
-  (iniciar sesión con Google una vez, instalar Telegram, probar con el dedo, decidir). Si le pides algo en pantalla,
+  (iniciar sesión con Google una vez, activar las notificaciones en su móvil, probar con el dedo, decidir). Si le pides algo en pantalla,
   explícalo **paso a paso y con nombres exactos de botones**.
 - **No toques lo que ya funciona.** Su frase: «Ojo con lo que tocas. No quiero afectar en nada el funcionamiento de lo
   que ya hay». Antes de cambiar algo compartido (reglas de seguridad, datos, avisos) haz una prueba que demuestre que lo
@@ -38,7 +38,7 @@ Todo el repositorio puede ser público: **aquí no hay (ni debe haber) contrase�
 | Datos | Firebase, proyecto `pizarra-de-tareas-semanales`, Firestore `artifacts/ecologicos-almeria-v1/...` |
 | Fotos | Firebase Storage `pizarra-de-tareas-semanales.firebasestorage.app` (US-CENTRAL1), carpeta `fotos/` |
 | Avisos + envío horas | Google Cloud: función `avisos` (europe-west1) + Scheduler `avisos-pizarra` cada 5 min. Código: `avisos/main.py` |
-| Telegram | bot @PizarraEcologicosbot; clave en Secret Manager `TELEGRAM_BOT_TOKEN` (y en GitHub Actions) |
+| Notificaciones | push estándar (Web Push + VAPID); `sw.js`; clave privada en Secret Manager `VAPID_PRIVATE_KEY`. Telegram se retiró el 26/11/2026 |
 
 **Cómo se publica un cambio de la app:** editar `src/app.jsx` (o `espejo/src/app.jsx`) → `./build.sh` (genera `app.js` y
 `app.css`; **hay que subirlos**) → `./pruebas/correr-todo.sh` → commit → `git push origin <rama>` y
@@ -48,7 +48,7 @@ Cada usuario debe **recargar** una vez para ver el cambio.
 Colecciones de Firestore (todas bajo `artifacts/ecologicos-almeria-v1/`): `board` (tareas de trabajadores, pizarra viva),
 `history` (copia de los días pasados; la crea la propia pizarra, cada minuto que alguien la tiene abierta, con lo que ya es de ayer o antes), `catalog` (lista de tareas de
 cada finca, con `usos`), `fincas`, `workers`, `config/general` (horaEntrada, horaSalida, descansoMin, minutosAntes,
-horaRecordatorio…), `avisos/{uid}` (Telegram de cada uno), `privadas/{uid}/tareas` y `privadas/{uid}/catalogo` (**personales y
+horaRecordatorio…), `avisos/{uid}` (aparatos con notificaciones de cada uno: `subs`), `privadas/{uid}/tareas` y `privadas/{uid}/catalogo` (**personales y
 privados**: solo su dueño; la espejo, los avisos y la app agrícola **no** los leen).
 
 **Quién entra (Firebase Authentication, correo + contraseña):** Fran y su hermano (leen y escriben; sus UID están en
@@ -70,18 +70,21 @@ el simulador, publicar (ver §5), y darle a Fran correo + contraseña hecha.
 
 ## 4. Estado
 **Hecho y publicado (nov. 2026):** entrada con correo/contraseña y reglas de seguridad sin caducidad · aviso de «no se ha guardado» ·
-copia automática de la cuadrilla de ayer + avisos por Telegram (recordatorio 22:00, emergencia 45 min antes de entrar) · envío a la
+copia automática de la cuadrilla de ayer + avisos por notificación push, antes Telegram (recordatorio 22:00, emergencia 45 min antes de entrar) · envío a la
 app agrícola · pizarra v2 (autoguardado, lista de trabajadores completa, «Misma cuadrilla que ayer», «Repetir día anterior»,
 «＋ Añadir tarea» por día, «Copiar a» varios días, un día por pantalla en el móvil, sin franja ni números, instalable, código
 precompilado) · espejo con pestañas Hoy/Mañana · **fotos** en tareas · **tareas personales** privadas («Para mí», «👤 Mía»,
 lista personal por finca) · catálogo ordenado por uso · acceso de Mory a la espejo.
 
 **Pendiente / sin confirmar (díselo a Fran con honestidad):**
+0. **Notificaciones push (26/11/2026): probadas solo con un servicio falso, NO con un iPhone real.** Comprueba en los registros de la función
+   (§5) que a Fran y a su hermano les llegó el aviso de bienvenida («✅ Notificaciones activadas»). Si no llega y en los registros sale 403
+   de Apple, cambia `VAPID_SUB`. Hasta que no las activen, **no recibirán ningún aviso** (Telegram ya no se envía).
 1. **Sin confirmar con cuenta real** (el agente nunca tuvo la contraseña de Fran): subida real de **fotos**; crear la primera tarea
    personal en producción. Pide a Fran que lo pruebe y te cuente.
 2. **No he vuelto a mirar** si el envío diario de las 17:15 y de las 23:50 a la app agrícola, ni el recordatorio de las 22:00, llegan bien
    desde el 17/11. Mira los registros de la función (§5) y pregunta a Fran si le llegan los mensajes.
-3. **Su hermano** (cuenta creada) tardó en crear su contraseña y conectar su Telegram; confirma que ya entra.
+3. **Su hermano** (cuenta creada) tardó en crear su contraseña; confirma que ya entra y **que ha activado las notificaciones en su móvil** (Ajustes > Avisos).
 4. **Encargado y Mory:** comprobar que entran en la espejo.
 5. **Webs antiguas de Netlify** (primos, amigo Jorge, `pizarradetareas.netlify.app`): ya no funcionan; Fran dijo «si las usan, que me avisen».
    Netlify no tiene créditos para publicar. Detalle en `NOTAS.md`.
@@ -103,7 +106,7 @@ lista personal por finca) · catálogo ordenado por uso · acceso de Mory a la e
   poner contraseña, `accounts:lookup` para ver). Correo de «restablecer contraseña» caduca en 1 h; a los trabajadores se les pone la
   contraseña directamente.
 - **Desplegar la función de avisos** (desde la carpeta del repo):
-  `env -u CLOUDSDK_AUTH_ACCESS_TOKEN gcloud --quiet functions deploy avisos --gen2 --runtime=python312 --region=europe-west1 --timeout=170s --source=avisos --entry-point=avisos --trigger-http --no-allow-unauthenticated --service-account=pizarra-avisos@pizarra-de-tareas-semanales.iam.gserviceaccount.com --set-secrets=TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest,GESTION_AGRICOLA_CLAVE=GESTION_AGRICOLA_CLAVE:latest --memory=256Mi --max-instances=1` (con `CLOUDSDK_CORE_PROJECT` puesto).
+  `env -u CLOUDSDK_AUTH_ACCESS_TOKEN gcloud --quiet functions deploy avisos --gen2 --runtime=python312 --region=europe-west1 --timeout=170s --source=avisos --entry-point=avisos --trigger-http --no-allow-unauthenticated --service-account=pizarra-avisos@pizarra-de-tareas-semanales.iam.gserviceaccount.com --set-secrets=VAPID_PRIVATE_KEY=VAPID_PRIVATE_KEY:latest,GESTION_AGRICOLA_CLAVE=GESTION_AGRICOLA_CLAVE:latest --memory=256Mi --max-instances=1` (con `CLOUDSDK_CORE_PROJECT` puesto).
   Probar: `gcloud scheduler jobs run avisos-pizarra --location=europe-west1` y leer `gcloud logging read '... service_name="avisos" ...'`.
 - **Supabase / Drive / Gmail:** herramientas `mcp__Supabase__*`, `mcp__Google_Drive__*` conectadas a la cuenta de Fran. La clave de la app
   agrícola está en un documento de su Drive y ya copiada a Secret Manager.
