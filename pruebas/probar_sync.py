@@ -105,4 +105,24 @@ A.requests.post = lambda url, **k: (llamadas.append((url, k.get("json"))), Resp(
 cuenta_espejo_real("UID9", False); cuenta_espejo_real("UID9", True)
 comprobar(llamadas[0][0].endswith("/projects/" + A.PROJECT + "/accounts:update") and llamadas[0][1] == {"localId": "UID9", "disableUser": True}, "dar de baja → disableUser = True, en el proyecto correcto")
 comprobar(llamadas[1][1] == {"localId": "UID9", "disableUser": False}, "reactivar → disableUser = False")
+print("9) nombres: con sincronizarNombres manda el nombre de appero (el real); sin él no se toca")
+reiniciar(); docs.update({"p1": {"name": "Ana"}})
+l9 = [{"id": "U1", "nombre": "Ana Lopez", "activo": True, "id_pizarra": "p1"}, {"id": "U2", "nombre": "Beto", "activo": True, "id_pizarra": "p2"}]
+A.sincronizar_trabajadores(None, config, l9)
+comprobar(docs["p1"]["name"] == "Ana", "sin el interruptor, el nombre no cambia")
+config["sincronizarNombres"] = True; escrituras.clear()
+A.sincronizar_trabajadores(None, config, l9)
+comprobar(docs["p1"]["name"] == "Ana Lopez" and docs["p2"]["name"] == "Beto", "con el interruptor, «Ana» pasa a «Ana Lopez» y «Beto» (ya igual) no se toca")
+escrituras.clear(); A.sincronizar_trabajadores(None, config, l9)
+comprobar([e for e in escrituras if e[0].startswith("workers/")] == [], "repetir no cambia nada")
+l9b = [{"id": "U1", "nombre": "   ", "activo": True, "id_pizarra": "p1"}]
+A.sincronizar_trabajadores(None, config, l9b)
+comprobar(docs["p1"]["name"] == "Ana Lopez", "un nombre vacío en appero no borra el de la pizarra")
+print("9b) freno: más de 20 cambios de nombre a la vez no se aplican")
+reiniciar(); config["sincronizarNombres"] = True
+for k in range(25): docs[f"w{k}"] = {"name": f"Viejo{k}"}
+l25 = [{"id": f"X{k}", "nombre": f"Nuevo{k}", "activo": True, "id_pizarra": f"w{k}"} for k in range(25)]
+avisos.clear(); A.sincronizar_trabajadores(None, config, l25)
+comprobar(all(docs[f"w{k}"]["name"] == f"Viejo{k}" for k in range(25)) and [a[0] for a in avisos] == ["sync-freno"], "no se renombra a nadie y se avisa una vez")
+comprobar(all(docs[f"w{k}"].get("agricolaId") == f"X{k}" for k in range(25)), "pero sí se vinculan (lo demás sigue funcionando)")
 print("\nRESULTADO:", "TODO BIEN" if not fallos else f"{fallos} FALLOS"); sys.exit(1 if fallos else 0)

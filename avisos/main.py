@@ -220,6 +220,7 @@ def confirmar_nuevos(s):
 # Se activa con config/general.trabajadoresDesdeAppero. Nunca se borra a nadie: una baja es activo=false.
 
 SYNC_MAX_BAJAS = 3   # más bajas de golpe que esto: no se aplican y se avisa (freno de seguridad)
+SYNC_MAX_RENOMBRES = 20  # más cambios de nombre de golpe que esto: no se aplican y se avisa
 SYNC_CAIDA_MIN = 60  # minutos sin poder leer appero antes de avisar
 
 
@@ -234,9 +235,10 @@ def leer_appero():
     return lista
 
 
-def planificar_trabajadores(lista, docs, ahora_ms):
+def planificar_trabajadores(lista, docs, ahora_ms, nombres=False):
     """Compara la lista de appero con los trabajadores de la pizarra (no escribe nada).
-    Devuelve (crear, cambios): crear = trabajadores de appero que faltan; cambios = [(id_doc, {campos})]."""
+    Devuelve (crear, cambios): crear = trabajadores de appero que faltan; cambios = [(id_doc, {campos})].
+    Con nombres=True el nombre de appero (el real) sustituye al de la pizarra."""
     por_id = {d["id"]: d for d in docs}
     por_appero = {d["agricolaId"]: d for d in docs if d.get("agricolaId")}
     sin_vincular = {}
@@ -262,6 +264,10 @@ def planificar_trabajadores(lista, docs, ahora_ms):
             cambio = {"activo": True, "bajaEn": None}
         if doc.get("agricolaId") != t["id"]:
             cambio["agricolaId"] = t["id"]
+        if nombres:
+            nuevo = (t["nombre"] or "").strip()
+            if nuevo and nuevo != (doc.get("name") or "").strip():
+                cambio["name"] = nuevo
         if cambio:
             cambios.append((doc["id"], cambio))
     for d in docs:  # vinculados que ya no vienen en la lista (borrados en appero): baja, nunca borrar
@@ -293,7 +299,15 @@ def sincronizar_trabajadores(s, config, lista=None):
             actualizar_doc(s, "config/general", {"avisoSyncCaido": hoy})
         return
     docs = leer_coleccion(s, "workers")
-    crear, cambios = planificar_trabajadores(lista, docs, ahora_ms)
+    crear, cambios = planificar_trabajadores(lista, docs, ahora_ms, nombres=bool(config.get("sincronizarNombres")))
+    renombres = [x for x in cambios if "name" in x[1]]
+    if len(renombres) > SYNC_MAX_RENOMBRES:  # freno de seguridad: lo normal es un cambio de vez en cuando
+        print(f"Freno: appero cambia {len(renombres)} nombres a la vez; no se aplican.")
+        if config.get("avisoSyncNombres") != hoy:
+            enviar(s, f"⚠️ <b>Appero cambia {len(renombres)} nombres a la vez</b>\nNo lo he aplicado por seguridad. Si es correcto, avísame.", "sync-freno")
+            actualizar_doc(s, "config/general", {"avisoSyncNombres": hoy})
+        cambios = [(i, {k: v for k, v in c.items() if k != "name"}) for i, c in cambios]
+        cambios = [x for x in cambios if x[1]]
     bajas = [x for x in cambios if x[1].get("activo") is False]
     if len(bajas) > SYNC_MAX_BAJAS:  # freno de seguridad: lo normal es una baja de vez en cuando
         por_id = {d["id"]: d for d in docs}
@@ -331,7 +345,7 @@ def simular_trabajadores():
     s = sesion()
     lista = leer_appero()
     docs = leer_coleccion(s, "workers")
-    crear, cambios = planificar_trabajadores(lista, docs, int(time.time() * 1000))
+    crear, cambios = planificar_trabajadores(lista, docs, int(time.time() * 1000), nombres=True)
     por_id = {d["id"]: d for d in docs}
     nombre = lambda i: por_id[i].get("name", "?")
     bajas = [(i, c) for i, c in cambios if c.get("activo") is False]
@@ -342,9 +356,7 @@ def simular_trabajadores():
     linea(f"bajas (el freno salta a partir de {SYNC_MAX_BAJAS + 1})", [nombre(i) for i, _ in bajas])
     linea("reactivaciones", [nombre(i) for i, c in cambios if c.get("activo") is True])
     linea("solo se vinculan", [nombre(i) for i, c in cambios if "activo" not in c])
-    linea("nombres distintos (no se tocan)", [
-        f"{d.get('name')} <-> {t['nombre']}" for d in docs for t in lista
-        if (t.get("id_pizarra") == d["id"] or t["id"] == d.get("agricolaId")) and normalizar(t["nombre"]) != normalizar(d.get("name"))])
+    linea("cambios de nombre", [f"{nombre(i)} -> {c['name']}" for i, c in cambios if "name" in c])
     linea("activos en la pizarra que appero no conoce", [
         d.get("name") for d in docs if d.get("activo") is not False
         and not any(t.get("id_pizarra") == d["id"] or t["id"] == d.get("agricolaId") for t in lista)])

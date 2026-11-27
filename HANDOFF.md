@@ -81,7 +81,7 @@ lista personal por finca) · catálogo ordenado por uso · acceso de Mory a la e
    Pendiente: la **baja real** todavía no se ha visto funcionar de punta a punta (se probó con simulaciones y con una cuenta de prueba de Firebase);
    cuando Fran dé de baja a alguien en appero, comprueba que desaparece de la pizarra en ≤2 min y (si es Fabio o Mory) que su cuenta de la espejo se desactiva.
    Condiciones de Fran: AppSheet «todavía sí, en breve no» (cuando deje de usarlo, apagar su copia automática: `sincronizar-appsheet` y el Apps Script
-   `copiarAppSheet`, que CREAN trabajadores si el nombre no coincide); nombres: fase 2 cuando él lo diga (renombrar en appero a los de la pizarra).
+   `copiarAppSheet`, que CREAN trabajadores si el nombre no coincide); nombres: HECHO el 27/11/2026 (mandan los de appero, los reales; ver `NOTAS.md`). Pendiente: el apellido del trabajador «Aboulaye» (coincide con «Aboulaye Keita»), que se añade en appero.
    Conversación activa de appero: `session_016chSad3b7CjeZ3rfWMy2VM` («Appero app development»).
 0. **Notificaciones push (26/11/2026): el iPhone de Fran quedó confirmado el 27/11 (Apple las acepta tras cambiar el contacto VAPID a `example.com`); falta confirmar con Fran que vio «✅ Notificaciones activadas» y que su hermano las activó.** Comprueba en los registros de la función
    (§5) que a Fran y a su hermano les llegó el aviso de bienvenida («✅ Notificaciones activadas»). Si no llega y en los registros sale 403
