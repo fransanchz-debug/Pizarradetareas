@@ -478,8 +478,8 @@ function App() {
 
   const deleteWorker = async (id) => {
     const w = workers.find(x => x.id === id);
-    if (!user || !window.confirm(`¿Seguro que quieres borrar a ${w ? w.name : 'este trabajador'}?\n\nDejará de aparecer en el histórico y en la app agrícola.`)) return;
-    await window.FirebaseAPI.deleteDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'workers', id));
+    if (!user || !window.confirm(`¿Dar de baja a ${w ? w.name : 'este trabajador'}?\n\nDejará de salir al asignar tareas, pero conserva su nombre en los días pasados.`)) return;
+    await window.FirebaseAPI.updateDoc(window.FirebaseAPI.doc(window.FirebaseAPI.db, 'artifacts', APP_ID, 'workers', id), { activo: false, bajaEn: Date.now() });
   };
 
   const addCatalogTask = async (fincaId) => {
@@ -619,7 +619,7 @@ function App() {
     boardTasks.filter(t => (t.targetDateStr || t.dateString) === fecha).forEach(t => porId.set(t.id, t));
     return [...porId.values()].sort((a, b) => (a.order || 0) - (b.order || 0));
   };
-  const cuadrillaDe = (t) => ((t.workerIds && t.workerIds.length ? t.workerIds : t.finalWorkers) || []).filter(id => workers.some(w => w.id === id));
+  const cuadrillaDe = (t) => ((t.workerIds && t.workerIds.length ? t.workerIds : t.finalWorkers) || []).filter(id => workers.some(w => w.id === id && w.activo !== false));
   const cuadrillaDeAyer = (task) => {
     const ayer = tareasDeFecha(diaAnterior(fechaTarea(task)));
     const igual = ayer.find(t => t.fincaId === task.fincaId && normalizar(t.description) === normalizar(task.description) && cuadrillaDe(t).length);
@@ -785,7 +785,7 @@ function App() {
       contarUso(t.catalogTaskId);
       await addDoc(collection(db, 'artifacts', APP_ID, 'board'), {
         catalogTaskId: t.catalogTaskId || null, fincaId: t.fincaId, number: t.number || null, description: t.description,
-        dayId: dia.id, dateString: fecha, targetDateStr: fecha, notes: t.notes || '', workerIds: t.workerIds || [],
+        dayId: dia.id, dateString: fecha, targetDateStr: fecha, notes: t.notes || '', workerIds: (t.workerIds || []).filter(id => workers.some(w => w.id === id && w.activo !== false)),
         stars: t.stars || 0, fotos: t.fotos || [], order: base + i, createdAt: base
       });
       hechas.push(`${dia.id} ${dia.numeroDia}`);
@@ -1406,13 +1406,13 @@ function App() {
                     <button type="submit" className="bg-blue-600 text-white px-3 text-sm font-bold rounded hover:bg-blue-700">Añadir</button>
                   </form>
                   <div className="space-y-1.5">
-                    {workers.map(w => (
+                    {workers.filter(w => w.activo !== false).map(w => (
                       <div key={w.id} className="flex justify-between items-center bg-white p-2 border rounded shadow-sm">
                         <span className="font-semibold text-sm text-slate-700 flex items-center gap-2">👤 {w.name}</span>
                         <button onClick={() => deleteWorker(w.id)} className="p-1 hover:bg-red-50 text-red-500 rounded text-xs">🗑️</button>
                       </div>
                     ))}
-                    {workers.length === 0 && <div className="text-center p-3 text-xs text-slate-500 italic">No hay trabajadores registrados.</div>}
+                    {workers.filter(w => w.activo !== false).length === 0 && <div className="text-center p-3 text-xs text-slate-500 italic">No hay trabajadores registrados.</div>}
                   </div>
                 </div>
               )}
@@ -1513,8 +1513,9 @@ function App() {
         const fechaEsta = fechaTarea(boardTaskMenu);
         // Libres (y los de esta tarea) primero; debajo, los que ya están en otra tarea ese día.
         const otraTareaDe = (wId) => boardTasks.find(t => t.id !== boardTaskMenu.id && (t.targetDateStr || t.dateString) === fechaEsta && (t.workerIds || []).includes(wId));
-        const libres = workers.filter(w => (boardTaskMenu.workerIds || []).includes(w.id) || !otraTareaDe(w.id));
-        const ocupados = workers.filter(w => !libres.includes(w));
+        const lista = workers.filter(w => w.activo !== false || (boardTaskMenu.workerIds || []).includes(w.id));
+        const libres = lista.filter(w => (boardTaskMenu.workerIds || []).includes(w.id) || !otraTareaDe(w.id));
+        const ocupados = lista.filter(w => !libres.includes(w));
         const deAyer = cuadrillaDeAyer(boardTaskMenu);
         const mismaQueAyer = deAyer && deAyer.length === (boardTaskMenu.workerIds || []).length && deAyer.every(id => (boardTaskMenu.workerIds || []).includes(id));
         const alternar = (wId) => {
@@ -1530,7 +1531,7 @@ function App() {
               className={`flex items-center justify-between gap-1.5 px-2 py-2 rounded-lg border text-left transition-colors ${marcado ? 'bg-blue-50 border-blue-400 text-blue-900' : ocupado ? 'bg-slate-50 border-slate-200 text-slate-500' : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50'}`}>
               <span className="flex items-center gap-1.5 min-w-0">
                 <span className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 text-xs ${marcado ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300'}`}>{marcado ? '✓' : ''}</span>
-                <span className={`text-sm font-semibold truncate ${ocupado && !marcado ? 'line-through' : ''}`}>{w.name}</span>
+                <span className={`text-sm font-semibold truncate ${ocupado && !marcado ? 'line-through' : ''}`}>{w.name}{w.activo === false && <span className="ml-1.5 text-xs font-bold text-amber-700">de baja</span>}</span>
               </span>
               {otraFinca && <span className={`text-xs font-bold px-1.5 rounded text-white shrink-0 ${otraFinca.handleColor}`}>{getFincaTag(otraFinca.name)}</span>}
             </button>

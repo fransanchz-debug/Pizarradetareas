@@ -284,7 +284,9 @@ class Datos:
         self.board = leer_coleccion(s, "board")
         self.history = leer_coleccion(s, "history")
         self.fincas = {f["id"]: f for f in leer_coleccion(s, "fincas")}
-        self.nombres = {w["id"]: w.get("name", "?") for w in leer_coleccion(s, "workers")}
+        trabajadores = leer_coleccion(s, "workers")
+        self.nombres = {w["id"]: w.get("name", "?") for w in trabajadores}  # todos (también los de baja): para los nombres
+        self.activos = {w["id"] for w in trabajadores if w.get("activo") is not False}  # los que se pueden asignar
 
     def etiqueta(self, t):
         finca = self.fincas.get(t.get("fincaId"), {}).get("name", "?")
@@ -295,7 +297,7 @@ class Datos:
 
     def sin_tarea(self, tareas, extra_ids=(), faltan=()):
         asignados = {w for t in tareas for w in (t.get("workerIds") or [])} | set(extra_ids) | set(faltan)
-        return sorted((n for i, n in self.nombres.items() if i not in asignados), key=normalizar)
+        return sorted((n for i, n in self.nombres.items() if i in self.activos and i not in asignados), key=normalizar)
 
     def faltas(self, fecha):
         """{id_pizarra: motivo} de quien está apuntado como ausente en la app agrícola."""
@@ -354,7 +356,7 @@ def recordatorio(s, dia):
     """Cómo está planificado `dia` (normalmente mañana). Solo informa."""
     d = Datos(s)
     fecha, anterior = dia.isoformat(), (dia - dt.timedelta(days=1)).isoformat()
-    tareas, copias = copiar_cuadrillas(d.board, d.history, set(d.nombres), fecha, anterior)
+    tareas, copias = copiar_cuadrillas(d.board, d.history, d.activos, fecha, anterior)
     se_copian = {t["id"] for t, _ in copias}
     sin_cuadrilla = [t for t in tareas if not t.get("workerIds") and t["id"] not in se_copian]
     print(f"Recordatorio: {len(tareas)} tareas, {len(copias)} se copiarán, {len(sin_cuadrilla)} sin cuadrilla.")
@@ -384,7 +386,7 @@ def emergencia(s, dia):
     """Antes de entrar: copia las cuadrillas que falten y avisa si queda algo pendiente."""
     d = Datos(s)
     fecha, anterior = dia.isoformat(), (dia - dt.timedelta(days=1)).isoformat()
-    tareas, copias = copiar_cuadrillas(d.board, d.history, set(d.nombres), fecha, anterior)
+    tareas, copias = copiar_cuadrillas(d.board, d.history, d.activos, fecha, anterior)
     faltan = d.faltas(fecha) if tareas else {}
     copias = [(t, [w for w in eq if w not in faltan]) for t, eq in copias]
     copias = [(t, eq) for t, eq in copias if eq]
@@ -447,7 +449,7 @@ def enviar_agricola(s, config, dia):
         "fecha": fecha,
         "jornada": jornada(config),
         "trabajadores": [{"id": i, "nombre": d.nombres[i], "tareas": ts} for i, ts in por_trabajador.items()],
-        "sin_tarea": [{"id": i, "nombre": n} for i, n in d.nombres.items() if i not in por_trabajador],
+        "sin_tarea": [{"id": i, "nombre": n} for i, n in d.nombres.items() if i in d.activos and i not in por_trabajador],
     }
     r = requests.post(AGRI_URL, json=cuerpo, headers={"x-clave": AGRI_KEY}, timeout=60)
     r.raise_for_status()
