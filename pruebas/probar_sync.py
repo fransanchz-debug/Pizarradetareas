@@ -16,6 +16,7 @@ def actualizar_doc(s, ruta, campos):
     escrituras.append((ruta, campos))
     if ruta == "config/general": config.update(campos)
     elif ruta.startswith("workers/"): docs.setdefault(ruta.split("/")[1], {}).update(campos)
+cuenta_espejo_real = A.cuenta_espejo  # la guardo para probarla aparte
 A.leer_coleccion, A.actualizar_doc = leer_coleccion, actualizar_doc
 A.enviar = lambda s, texto, etiqueta="aviso", urgente=False: avisos.append((etiqueta, texto))
 A.cuenta_espejo = lambda uid, activa: cuentas.append((uid, activa))
@@ -92,4 +93,16 @@ d.board = [{"id": "t1", "workerIds": ["a", "b"], "targetDateStr": "2026-11-30"},
 l7 = d.lineas_baja("2026-11-28")
 comprobar(len(l7) == 1 and "Beto (2 tareas, desde el 30/11)" in l7[0] and "Ana" not in l7[0], f"{l7[0].strip()}")
 comprobar(d.lineas_baja("2026-12-05") == [], "sin tareas futuras no avisa")
+print("8) cuenta_espejo() llama de verdad a Firebase Authentication con el proyecto y la cuenta correctos")
+llamadas = []
+class Creds:
+    token = "t"
+    def refresh(self, req): pass
+A.google.auth.default = lambda scopes=None: (Creds(), "p")
+class Resp:
+    def raise_for_status(self): pass
+A.requests.post = lambda url, **k: (llamadas.append((url, k.get("json"))), Resp())[1]
+cuenta_espejo_real("UID9", False); cuenta_espejo_real("UID9", True)
+comprobar(llamadas[0][0].endswith("/projects/" + A.PROJECT + "/accounts:update") and llamadas[0][1] == {"localId": "UID9", "disableUser": True}, "dar de baja → disableUser = True, en el proyecto correcto")
+comprobar(llamadas[1][1] == {"localId": "UID9", "disableUser": False}, "reactivar → disableUser = False")
 print("\nRESULTADO:", "TODO BIEN" if not fallos else f"{fallos} FALLOS"); sys.exit(1 if fallos else 0)

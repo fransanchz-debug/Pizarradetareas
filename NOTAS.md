@@ -65,7 +65,7 @@ Fran les ha dicho que avisen si las usan. Si hace falta reactivarlas:
 También existen datos de pruebas en `artifacts/ecologicos-almeria-pruebas-aisladas`
 y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa ninguna app.
 
-## Trabajadores: la lista viene de appero (gestión agrícola) — desde 27/11/2026
+## Trabajadores: la lista viene de appero (gestión agrícola) — ACTIVA desde el 27/11/2026
 - **Altas y bajas se hacen SOLO en appero**; la pizarra las copia. Código: `sincronizar_trabajadores()` en `avisos/main.py`
   (la función de avisos, cada 5 min; objetivo 2 min). Fuente: `GET recibir-pizarra?trabajadores=1` de gestion-agricola.
 - Solo manda el campo **`activo`**; no se sincronizan los nombres (fase 2, cuando se corrijan en appero). Nunca se borra a nadie:
@@ -78,7 +78,9 @@ y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa nin
   toca nada y se avisa pasada 1 h (una vez al día).
 - **Cuenta de la espejo:** si la ficha tiene `uidEspejo` (Fabio y Mory), al darla de baja se **desactiva su cuenta** de Firebase
   Authentication (rol `firebaseauth.admin` de la cuenta técnica) y se reactiva si vuelve (campo `espejoDeshabilitada`).
-- Se **activa** con `config/general.trabajadoresDesdeAppero = true` (la pantalla Ajustes > Trabajadores pasa entonces a solo
+- **Estado: ACTIVA** (`trabajadoresDesdeAppero=true`, revisión cada 2 min con el Scheduler `*/2 * * * *`). Primera sincronización real: 14 trabajadores
+  vinculados, sin cambios visibles. Para ver qué haría sin aplicar: `…/avisos?simular_trabajadores=1` (solo lee; el resultado sale en los registros de Google;
+  desde el entorno de Claude no se llega a Supabase). Se **activa** con `config/general.trabajadoresDesdeAppero = true` (la pantalla Ajustes > Trabajadores pasa entonces a solo
   consulta). Antes de activarlo: `python3 pruebas/ver_sync_trabajadores.py` muestra qué haría sin aplicar nada.
 - Pruebas: `pruebas/probar_sync.py`, `probar_trabajadores.py`, `t13.js`, `t14.js`.
 
@@ -111,7 +113,8 @@ y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa nin
   Clave pública VAPID: constante `VAPID_PUBLICA` en `src/app.jsx`. Clave privada: solo en Secret Manager
   `VAPID_PRIVATE_KEY` (la función la lee como secreto; el flujo de GitHub, de Secret Manager). Firma moderna
   (`Vapid02`, RFC 8292): **Apple la exige**. El contacto de la firma (`VAPID_SUB` en `avisos/main.py`) es
-  genérico a propósito; si un servicio lo rechazara (403 en los registros), cambiarlo ahí.
+  genérico a propósito (`mailto:avisos@example.com`): con un dominio inventado `.invalid` Apple respondió **403 BadJwtToken**; si algún día
+  rechazara este, cambiarlo ahí. Verificado el 27/11/2026: el iPhone de Fran quedó confirmado.
   En iPhone solo funcionan con la pizarra **instalada en la pantalla de inicio** (iOS 16.4 o más).
   Prueba sin móvil: `pruebas/probar_push.py` (servicio falso + descifrado) y `pruebas/t12.js` (pantalla).
 - Telegram: **retirado** (la app y la función ya no lo usan). Quedan sin uso, y se pueden borrar: el secreto

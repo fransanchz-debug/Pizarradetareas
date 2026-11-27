@@ -55,8 +55,9 @@ CUENTAS_AVISOS = {
 PROYECTO_NUM = "669734412138"
 URL_APP = "https://fransanchz-debug.github.io/Pizarradetareas/"
 # Contacto que exige el estándar de las notificaciones. Genérico a propósito: no se envían datos personales a
-# Apple/Google. Si algún día un servicio lo rechaza (error 403 en los registros), cambiarlo aquí.
-VAPID_SUB = "mailto:avisos@pizarra-tareas.invalid"
+# Apple/Google. Apple lo valida: con un dominio inventado («.invalid») respondió 403 BadJwtToken; un dominio
+# real y reservado para ejemplos sí vale. Si algún día lo rechazaran (403 en los registros), cambiarlo aquí.
+VAPID_SUB = "mailto:avisos@example.com"
 AGRI_URL = "https://pykqyjynvtgstqzgnilu.supabase.co/functions/v1/recibir-pizarra"
 AGRI_KEY = os.environ.get("GESTION_AGRICOLA_CLAVE", "").strip()
 HORA_SALIDA_DEFECTO = "17:00"
@@ -176,9 +177,13 @@ def aviso_push(sub, titulo, cuerpo, etiqueta, urgente=False):
 
 
 def estado_envio(e):
-    """'caducado' si el aparato ya no existe (404/410); si no, el código o None."""
-    codigo = getattr(getattr(e, "response", None), "status_code", None)
-    return "caducado" if codigo in (404, 410) else codigo
+    """'caducado' si el aparato ya no existe (404/410); si no, el código (y el motivo que da el servicio) o None."""
+    resp = getattr(e, "response", None)
+    codigo = getattr(resp, "status_code", None)
+    if codigo in (404, 410):
+        return "caducado"
+    motivo = (getattr(resp, "text", "") or "")[:120].replace("\n", " ")
+    return f"{codigo}: {motivo}" if codigo else None
 
 
 def partir(texto):
@@ -269,8 +274,8 @@ def cuenta_espejo(uid, activa):
     """Activa o desactiva la cuenta con la que un trabajador entra a la espejo."""
     creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     creds.refresh(google.auth.transport.requests.Request())
-    r = requests.post(f"https://identitytoolkit.googleapis.com/v1/projects/{PROYECTO}/accounts:update",
-                      headers={"Authorization": "Bearer " + creds.token, "x-goog-user-project": PROYECTO},
+    r = requests.post(f"https://identitytoolkit.googleapis.com/v1/projects/{PROJECT}/accounts:update",
+                      headers={"Authorization": "Bearer " + creds.token, "x-goog-user-project": PROJECT},
                       json={"localId": uid, "disableUser": not activa}, timeout=30)
     r.raise_for_status()
 
