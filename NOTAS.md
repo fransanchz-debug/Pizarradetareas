@@ -65,6 +65,23 @@ Fran les ha dicho que avisen si las usan. Si hace falta reactivarlas:
 También existen datos de pruebas en `artifacts/ecologicos-almeria-pruebas-aisladas`
 y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa ninguna app.
 
+## Trabajadores: la lista viene de appero (gestión agrícola) — desde 27/11/2026
+- **Altas y bajas se hacen SOLO en appero**; la pizarra las copia. Código: `sincronizar_trabajadores()` en `avisos/main.py`
+  (la función de avisos, cada 5 min; objetivo 2 min). Fuente: `GET recibir-pizarra?trabajadores=1` de gestion-agricola.
+- Solo manda el campo **`activo`**; no se sincronizan los nombres (fase 2, cuando se corrijan en appero). Nunca se borra a nadie:
+  una baja es `activo:false` en `workers/{id}` (así los días pasados conservan el nombre). Los de baja no salen al asignar, no se
+  copian en cuadrillas, no cuentan como «sin tarea» ni se envían a la app agrícola como «sin tarea»; si siguen asignados a tareas
+  futuras, el recordatorio de las 22:00 y el aviso de emergencia lo dicen («🚫 De baja pero asignado»).
+- Alta nueva en appero → se crea `workers/{uuid de appero}` con `agricolaId`. Vuelve alguien → se reactiva la misma ficha
+  (o se vincula por nombre a una de baja sin vincular). Desaparece de appero → baja.
+- **Freno de seguridad:** más de 3 bajas a la vez o una lista vacía/rara → no se aplica y se avisa. Si appero no responde: no se
+  toca nada y se avisa pasada 1 h (una vez al día).
+- **Cuenta de la espejo:** si la ficha tiene `uidEspejo` (Fabio y Mory), al darla de baja se **desactiva su cuenta** de Firebase
+  Authentication (rol `firebaseauth.admin` de la cuenta técnica) y se reactiva si vuelve (campo `espejoDeshabilitada`).
+- Se **activa** con `config/general.trabajadoresDesdeAppero = true` (la pantalla Ajustes > Trabajadores pasa entonces a solo
+  consulta). Antes de activarlo: `python3 pruebas/ver_sync_trabajadores.py` muestra qué haría sin aplicar nada.
+- Pruebas: `pruebas/probar_sync.py`, `probar_trabajadores.py`, `t13.js`, `t14.js`.
+
 ## Avisos diarios (copia de cuadrilla + notificaciones push)
 - Código: `avisos/main.py`. Lo ejecuta **Google Cloud Scheduler** cada 5 minutos
   (trabajo `avisos-pizarra`, zona Europe/Madrid) llamando a la función

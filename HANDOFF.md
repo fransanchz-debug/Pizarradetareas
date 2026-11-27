@@ -77,6 +77,12 @@ precompilado) · espejo con pestañas Hoy/Mañana · **fotos** en tareas · **ta
 lista personal por finca) · catálogo ordenado por uso · acceso de Mory a la espejo.
 
 **Pendiente / sin confirmar (díselo a Fran con honestidad):**
+00. **Sincronización de trabajadores con appero (27/11/2026): construida y desplegada pero APAGADA.** Falta que la otra sesión
+   (gestion-agricola) despliegue el endpoint `GET recibir-pizarra?trabajadores=1` (se lo pedí por mensaje; detalle en `NOTAS.md`).
+   Para activarla: (1) `python3 pruebas/ver_sync_trabajadores.py` y revisar el plan con Fran; (2) poner
+   `config/general.trabajadoresDesdeAppero=true` y `ultimaSyncTrabajadores=ahora`; (3) cambiar el Scheduler `avisos-pizarra` a
+   `*/2 * * * *`. Condiciones de Fran: AppSheet «todavía sí, en breve no» (su copia automática debe apagarse); nombres: fase 2.
+   Los 3 trabajadores que Fran había borrado a mano (Keita, Amigo Sidiki, Omar) se recuperaron como «de baja».
 0. **Notificaciones push (26/11/2026): probadas solo con un servicio falso, NO con un iPhone real.** Comprueba en los registros de la función
    (§5) que a Fran y a su hermano les llegó el aviso de bienvenida («✅ Notificaciones activadas»). Si no llega y en los registros sale 403
    de Apple, cambia `VAPID_SUB`. Hasta que no las activen, **no recibirán ningún aviso** (Telegram ya no se envía).

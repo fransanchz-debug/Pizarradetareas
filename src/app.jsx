@@ -1401,15 +1401,21 @@ function App() {
 
               {settingsTab === 'workers' && (
                 <div className="space-y-3">
+                  {avisosConfig.trabajadoresDesdeAppero ? (
+                    <div className="bg-blue-50 border border-blue-200 text-blue-900 text-xs rounded-lg p-2.5">
+                      Los trabajadores se dan de <b>alta y de baja en appero</b> (gestión agrícola). Aquí se actualizan solos en un par de minutos.
+                    </div>
+                  ) : (
                   <form onSubmit={addWorker} className="flex gap-2 bg-white p-2 rounded border shadow-sm">
                     <input type="text" value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)} placeholder="Nombre..." className="flex-1 p-1.5 text-sm border rounded outline-none focus:ring-2 focus:ring-blue-500" />
                     <button type="submit" className="bg-blue-600 text-white px-3 text-sm font-bold rounded hover:bg-blue-700">Añadir</button>
                   </form>
+                  )}
                   <div className="space-y-1.5">
                     {workers.filter(w => w.activo !== false).map(w => (
                       <div key={w.id} className="flex justify-between items-center bg-white p-2 border rounded shadow-sm">
                         <span className="font-semibold text-sm text-slate-700 flex items-center gap-2">👤 {w.name}</span>
-                        <button onClick={() => deleteWorker(w.id)} className="p-1 hover:bg-red-50 text-red-500 rounded text-xs">🗑️</button>
+                        {!avisosConfig.trabajadoresDesdeAppero && <button onClick={() => deleteWorker(w.id)} className="p-1 hover:bg-red-50 text-red-500 rounded text-xs">🗑️</button>}
                       </div>
                     ))}
                     {workers.filter(w => w.activo !== false).length === 0 && <div className="text-center p-3 text-xs text-slate-500 italic">No hay trabajadores registrados.</div>}

@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+import time
 import unicodedata
 from zoneinfo import ZoneInfo
 
@@ -209,6 +210,117 @@ def confirmar_nuevos(s):
         actualizar_doc(s, f"avisos/{a['id']}", {"subs": nuevas})
 
 
+# ---------- Trabajadores: la lista viene de appero (gestión agrícola) ----------
+# Altas y bajas se hacen SOLO en appero; la pizarra las copia (solo `activo`; los nombres no se tocan).
+# Se activa con config/general.trabajadoresDesdeAppero. Nunca se borra a nadie: una baja es activo=false.
+
+SYNC_MAX_BAJAS = 3   # más bajas de golpe que esto: no se aplican y se avisa (freno de seguridad)
+SYNC_CAIDA_MIN = 60  # minutos sin poder leer appero antes de avisar
+
+
+def leer_appero():
+    r = requests.get(AGRI_URL, params={"trabajadores": "1"}, headers={"x-clave": AGRI_KEY}, timeout=30)
+    r.raise_for_status()
+    lista = r.json().get("trabajadores")
+    ok = isinstance(lista, list) and lista and all(
+        isinstance(t, dict) and t.get("id") and t.get("nombre") and isinstance(t.get("activo"), bool) for t in lista)
+    if not ok:
+        raise ValueError("lista de trabajadores vacía o con formato inesperado")
+    return lista
+
+
+def planificar_trabajadores(lista, docs, ahora_ms):
+    """Compara la lista de appero con los trabajadores de la pizarra (no escribe nada).
+    Devuelve (crear, cambios): crear = trabajadores de appero que faltan; cambios = [(id_doc, {campos})]."""
+    por_id = {d["id"]: d for d in docs}
+    por_appero = {d["agricolaId"]: d for d in docs if d.get("agricolaId")}
+    sin_vincular = {}
+    for d in docs:
+        if not d.get("agricolaId"):
+            sin_vincular.setdefault(normalizar(d.get("name")), d)
+    crear, cambios, vistos = [], [], set()
+    for t in lista:
+        doc = (por_id.get(t.get("id_pizarra")) if t.get("id_pizarra") else None) or por_appero.get(t["id"]) or por_id.get(t["id"])
+        if doc is None:  # alguien de la pizarra sin vincular y con el mismo nombre (p. ej. alguien que vuelve): se vincula
+            cand = sin_vincular.get(normalizar(t["nombre"]))
+            if cand and cand["id"] not in vistos:
+                doc = cand
+        if doc is None:
+            if t["activo"]:
+                crear.append(t)
+            continue
+        vistos.add(doc["id"])
+        cambio = {}
+        if doc.get("activo") is not False and not t["activo"]:
+            cambio = {"activo": False, "bajaEn": ahora_ms}
+        elif doc.get("activo") is False and t["activo"]:
+            cambio = {"activo": True, "bajaEn": None}
+        if doc.get("agricolaId") != t["id"]:
+            cambio["agricolaId"] = t["id"]
+        if cambio:
+            cambios.append((doc["id"], cambio))
+    for d in docs:  # vinculados que ya no vienen en la lista (borrados en appero): baja, nunca borrar
+        if d["id"] not in vistos and d.get("agricolaId") and d.get("activo") is not False:
+            cambios.append((d["id"], {"activo": False, "bajaEn": ahora_ms}))
+    return crear, cambios
+
+
+def cuenta_espejo(uid, activa):
+    """Activa o desactiva la cuenta con la que un trabajador entra a la espejo."""
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    creds.refresh(google.auth.transport.requests.Request())
+    r = requests.post(f"https://identitytoolkit.googleapis.com/v1/projects/{PROYECTO}/accounts:update",
+                      headers={"Authorization": "Bearer " + creds.token, "x-goog-user-project": PROYECTO},
+                      json={"localId": uid, "disableUser": not activa}, timeout=30)
+    r.raise_for_status()
+
+
+def sincronizar_trabajadores(s, config, lista=None):
+    ahora_ms = int(time.time() * 1000)
+    hoy = dt.datetime.now(TZ).date().isoformat()
+    try:
+        lista = lista if lista is not None else leer_appero()
+    except Exception as e:  # si falla, la pizarra se queda con la última lista (nunca se da de baja por un error)
+        print(f"No se pudo leer appero: {type(e).__name__}")
+        ultima = int(config.get("ultimaSyncTrabajadores") or 0)
+        if ultima and ahora_ms - ultima > SYNC_CAIDA_MIN * 60000 and config.get("avisoSyncCaido") != hoy:
+            enviar(s, "⚠️ <b>No puedo leer los trabajadores de appero</b>\nLlevo más de una hora sin conseguirlo. La pizarra mantiene la última lista.", "sync-caida")
+            actualizar_doc(s, "config/general", {"avisoSyncCaido": hoy})
+        return
+    docs = leer_coleccion(s, "workers")
+    crear, cambios = planificar_trabajadores(lista, docs, ahora_ms)
+    bajas = [x for x in cambios if x[1].get("activo") is False]
+    if len(bajas) > SYNC_MAX_BAJAS:  # freno de seguridad: lo normal es una baja de vez en cuando
+        por_id = {d["id"]: d for d in docs}
+        print(f"Freno: appero pide {len(bajas)} bajas a la vez; no se aplican.")
+        if config.get("avisoSyncBloqueada") != hoy:
+            nombres = ", ".join(html.escape(por_id[i].get("name", "?")) for i, _ in bajas)
+            enviar(s, f"⚠️ <b>Appero pide dar de baja a {len(bajas)} trabajadores a la vez</b>\n{nombres}\nNo lo he aplicado por seguridad. Si es correcto, avísame.", "sync-freno")
+            actualizar_doc(s, "config/general", {"avisoSyncBloqueada": hoy})
+        cambios = [x for x in cambios if x not in bajas]
+    estado = {d["id"]: dict(d) for d in docs}
+    for t in crear:
+        campos = {"name": t["nombre"].strip(), "activo": True, "agricolaId": t["id"], "origen": "appero", "createdAt": ahora_ms}
+        actualizar_doc(s, f"workers/{t['id']}", campos)
+        estado[t["id"]] = {"id": t["id"], **campos}
+    for i, c in cambios:
+        actualizar_doc(s, f"workers/{i}", c)
+        estado[i].update(c)
+    # cuentas de la espejo: la de un trabajador de baja se desactiva (y se reactiva si vuelve)
+    for d in estado.values():
+        if d.get("uidEspejo"):
+            deshabilitar = d.get("activo") is False
+            if d.get("espejoDeshabilitada") is not deshabilitar:
+                try:
+                    cuenta_espejo(d["uidEspejo"], not deshabilitar)
+                    actualizar_doc(s, f"workers/{d['id']}", {"espejoDeshabilitada": deshabilitar})
+                except Exception as e:
+                    print(f"No se pudo cambiar la cuenta de la espejo ({type(e).__name__}); se reintentará.")
+    actualizar_doc(s, "config/general", {"ultimaSyncTrabajadores": ahora_ms})
+    if crear or cambios:
+        print(f"Trabajadores sincronizados: {len(crear)} altas, {len(cambios)} cambios.")
+
+
 # ---------- Cuadrillas ----------
 
 def normalizar(texto):
@@ -299,6 +411,22 @@ class Datos:
         asignados = {w for t in tareas for w in (t.get("workerIds") or [])} | set(extra_ids) | set(faltan)
         return sorted((n for i, n in self.nombres.items() if i in self.activos and i not in asignados), key=normalizar)
 
+    def lineas_baja(self, desde):
+        """Trabajadores de baja que siguen asignados a tareas de `desde` en adelante."""
+        por = {}
+        for t in self.board:
+            f = fecha_tarea(t)
+            if f >= desde:
+                for i in t.get("workerIds") or []:
+                    if i in self.nombres and i not in self.activos:
+                        por.setdefault(i, []).append(f)
+        if not por:
+            return []
+        texto = ", ".join(
+            f"{self.nombres[i]} ({len(fs)} tarea{'s' if len(fs) > 1 else ''}, desde el {min(fs)[8:10]}/{min(fs)[5:7]})"
+            for i, fs in sorted(por.items(), key=lambda x: normalizar(self.nombres[x[0]])))
+        return ["\n🚫 <b>De baja pero asignado:</b> " + html.escape(texto)]
+
     def faltas(self, fecha):
         """{id_pizarra: motivo} de quien está apuntado como ausente en la app agrícola."""
         if not AGRI_KEY:
@@ -377,7 +505,9 @@ def recordatorio(s, dia):
         if sin_tarea:
             lineas.append("\n⚠️ <b>Sin tarea asignada:</b> " + html.escape(", ".join(sin_tarea)))
         lineas += d.lineas_faltas(faltan)
-        if not copias and not sin_cuadrilla and not sin_tarea:
+        baja = d.lineas_baja(fecha)
+        lineas += baja
+        if not copias and not sin_cuadrilla and not sin_tarea and not baja:
             lineas.append("\n✅ Todo asignado.")
     enviar(s, "\n".join(lineas), "recordatorio")
 
@@ -399,7 +529,8 @@ def emergencia(s, dia):
         return
     sin_cuadrilla = [t for t in tareas if not t.get("workerIds")]
     sin_tarea = d.sin_tarea(tareas, faltan=faltan)
-    if not copias and not sin_cuadrilla and not sin_tarea:
+    baja = d.lineas_baja(fecha)
+    if not copias and not sin_cuadrilla and not sin_tarea and not baja:
         print("Todo en orden: no se avisa.")
         return
 
@@ -413,6 +544,7 @@ def emergencia(s, dia):
     if sin_tarea:
         lineas.append("\n⚠️ <b>Sin tarea asignada hoy:</b> " + html.escape(", ".join(sin_tarea)))
     lineas += d.lineas_faltas(faltan, " hoy")
+    lineas += baja
     enviar(s, "\n".join(lineas), "emergencia", urgente=True)
 
 
@@ -476,6 +608,11 @@ def main(forzar_emergencia=False, forzar_recordatorio=False, forzar_envio=False)
         confirmar_nuevos(s)  # primer aviso a los aparatos recién activados
     except Exception as e:  # un fallo aquí no debe parar la copia de cuadrillas ni el envío de horas
         print(f"No se pudieron confirmar aparatos nuevos: {type(e).__name__}")
+    if config.get("trabajadoresDesdeAppero") and AGRI_KEY:
+        try:
+            sincronizar_trabajadores(s, config)
+        except Exception as e:  # un fallo aquí no debe parar lo demás
+            print(f"Error al sincronizar trabajadores: {type(e).__name__}")
 
     ahora = dt.datetime.now(TZ)
     hoy = ahora.date().isoformat()
