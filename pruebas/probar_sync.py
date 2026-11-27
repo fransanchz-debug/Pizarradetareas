@@ -118,6 +118,17 @@ comprobar([e for e in escrituras if e[0].startswith("workers/")] == [], "repetir
 l9b = [{"id": "U1", "nombre": "   ", "activo": True, "id_pizarra": "p1"}]
 A.sincronizar_trabajadores(None, config, l9b)
 comprobar(docs["p1"]["name"] == "Ana Lopez", "un nombre vacío en appero no borra el de la pizarra")
+print("9c) nombre_real manda sobre el nombre corto; sin él se usa el corto; faltan_datos se copia")
+reiniciar(); docs.update({"p1": {"name": "Daoda"}, "p2": {"name": "Kebe"}}); config["sincronizarNombres"] = True
+l9c = [{"id": "U1", "nombre": "Daoda", "nombre_real": "Daouda", "activo": True, "id_pizarra": "p1", "faltan_datos": ["NIE"]},
+       {"id": "U2", "nombre": "Kebe", "activo": True, "id_pizarra": "p2", "faltan_datos": ["NIE", "apellidos"]}]
+A.sincronizar_trabajadores(None, config, l9c)
+comprobar(docs["p1"]["name"] == "Daouda", "«Daoda» pasa a «Daouda» (nombre_real)")
+comprobar(docs["p2"]["name"] == "Kebe", "sin nombre_real se queda el corto")
+comprobar(docs["p1"]["faltanDatos"] == ["NIE"] and docs["p2"]["faltanDatos"] == ["NIE", "apellidos"], "faltan_datos se copia")
+l9c[0]["faltan_datos"] = []
+A.sincronizar_trabajadores(None, config, l9c)
+comprobar(docs["p1"]["faltanDatos"] == [], "al completar la ficha el aviso desaparece")
 print("9b) freno: más de 20 cambios de nombre a la vez no se aplican")
 reiniciar(); config["sincronizarNombres"] = True
 for k in range(25): docs[f"w{k}"] = {"name": f"Viejo{k}"}

@@ -1413,9 +1413,16 @@ function App() {
                   )}
                   <div className="space-y-1.5">
                     {workers.filter(w => w.activo !== false).map(w => (
-                      <div key={w.id} className="flex justify-between items-center bg-white p-2 border rounded shadow-sm">
+                      <div key={w.id} className="bg-white p-2 border rounded shadow-sm">
+                       <div className="flex justify-between items-center">
                         <span className="font-semibold text-sm text-slate-700 flex items-center gap-2">👤 {w.name}</span>
                         {!avisosConfig.trabajadoresDesdeAppero && <button onClick={() => deleteWorker(w.id)} className="p-1 hover:bg-red-50 text-red-500 rounded text-xs">🗑️</button>}
+                       </div>
+                       {Array.isArray(w.faltanDatos) && w.faltanDatos.length > 0 && (
+                        <div className="mt-1.5 text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded p-1.5">
+                          ⚠️ Documento sin registrar bien: faltan {w.faltanDatos.join(', ')}. Se completa en appero.
+                        </div>
+                       )}
                       </div>
                     ))}
                     {workers.filter(w => w.activo !== false).length === 0 && <div className="text-center p-3 text-xs text-slate-500 italic">No hay trabajadores registrados.</div>}

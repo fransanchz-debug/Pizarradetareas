@@ -235,10 +235,21 @@ def leer_appero():
     return lista
 
 
+def nombre_pizarra(t):
+    """Nombre que se ve en la pizarra: el REAL (documento/nómina) de appero; si falta, el corto."""
+    return (t.get("nombre_real") or t.get("nombre") or "").strip()
+
+
+def faltan_datos(t):
+    """Lista de datos esenciales que faltan en la ficha de appero; None si appero aún no lo envía."""
+    f = t.get("faltan_datos")
+    return [str(x) for x in f] if isinstance(f, list) else None
+
+
 def planificar_trabajadores(lista, docs, ahora_ms, nombres=False):
     """Compara la lista de appero con los trabajadores de la pizarra (no escribe nada).
     Devuelve (crear, cambios): crear = trabajadores de appero que faltan; cambios = [(id_doc, {campos})].
-    Con nombres=True el nombre de appero (el real) sustituye al de la pizarra."""
+    Con nombres=True el nombre REAL de appero (nombre_real) sustituye al de la pizarra."""
     por_id = {d["id"]: d for d in docs}
     por_appero = {d["agricolaId"]: d for d in docs if d.get("agricolaId")}
     sin_vincular = {}
@@ -265,9 +276,12 @@ def planificar_trabajadores(lista, docs, ahora_ms, nombres=False):
         if doc.get("agricolaId") != t["id"]:
             cambio["agricolaId"] = t["id"]
         if nombres:
-            nuevo = (t["nombre"] or "").strip()
+            nuevo = nombre_pizarra(t)
             if nuevo and nuevo != (doc.get("name") or "").strip():
                 cambio["name"] = nuevo
+        faltan = faltan_datos(t)
+        if faltan is not None and faltan != (doc.get("faltanDatos") or []):
+            cambio["faltanDatos"] = faltan
         if cambio:
             cambios.append((doc["id"], cambio))
     for d in docs:  # vinculados que ya no vienen en la lista (borrados en appero): baja, nunca borrar
@@ -319,7 +333,7 @@ def sincronizar_trabajadores(s, config, lista=None):
         cambios = [x for x in cambios if x not in bajas]
     estado = {d["id"]: dict(d) for d in docs}
     for t in crear:
-        campos = {"name": t["nombre"].strip(), "activo": True, "agricolaId": t["id"], "origen": "appero", "createdAt": ahora_ms}
+        campos = {"name": nombre_pizarra(t), "activo": True, "agricolaId": t["id"], "origen": "appero", "createdAt": ahora_ms}
         actualizar_doc(s, f"workers/{t['id']}", campos)
         estado[t["id"]] = {"id": t["id"], **campos}
     for i, c in cambios:

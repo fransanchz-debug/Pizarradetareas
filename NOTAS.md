@@ -68,9 +68,12 @@ y colecciones antiguas en la raíz (`board`, `catalog`, `fincas`) que no usa nin
 ## Trabajadores: la lista viene de appero (gestión agrícola) — ACTIVA desde el 27/11/2026
 - **Altas y bajas se hacen SOLO en appero**; la pizarra las copia. Código: `sincronizar_trabajadores()` en `avisos/main.py`
   (la función de avisos, cada 5 min; objetivo 2 min). Fuente: `GET recibir-pizarra?trabajadores=1` de gestion-agricola.
-- Manda `activo` **y el nombre**: desde el 27/11/2026 (`config/general.sincronizarNombres=true`) el nombre REAL de appero sustituye al alias que Fran
-  había puesto en la pizarra («Komusa» → «Koumoussa Dembele», «Fabio» → «Fabio Mendes»…; 12 cambios). Si dos trabajadores coinciden en el nombre,
-  el apellido se añade EN APPERO (no en la pizarra) y llega solo. Freno: más de 20 renombres a la vez no se aplican y se avisa. Un nombre vacío
+- Manda `activo` **y el nombre REAL**: el que figura en el documento/nómina (campo `nombre_real` de appero = nombre de pila del documento; si dos
+  coinciden, nombre + primer apellido; si la ficha aún no tiene documento, el nombre corto `nombre`). OJO: el nombre corto de appero viene de AppSheet
+  y puede tener erratas; NO es «el real». Se aplica con `config/general.sincronizarNombres=true` (apagado hasta que appero confirma `nombre_real`
+  y el caso de Coulibali: Fran lo quiere «Madhidian Coulibaly»). También copia `faltan_datos` → `workers/{id}.faltanDatos`; la pestaña Trabajadores
+  muestra un aviso ámbar si faltan datos del documento (NIE, nombre, apellidos, nacionalidad…). Se empareja por id, nunca por nombre.
+  Freno: más de 20 renombres a la vez no se aplican y se avisa. Un nombre vacío
   en appero no borra el de la pizarra. Los de baja sin vínculo (Omar, Amigo Sidiki) conservan su nombre. Nunca se borra a nadie:
   una baja es `activo:false` en `workers/{id}` (así los días pasados conservan el nombre). Los de baja no salen al asignar, no se
   copian en cuadrillas, no cuentan como «sin tarea» ni se envían a la app agrícola como «sin tarea»; si siguen asignados a tareas
