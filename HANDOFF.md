@@ -134,3 +134,9 @@ lista personal por finca) · catálogo ordenado por uso · acceso de Mory a la e
 2. `npm install && ./pruebas/correr-todo.sh` → debe pasar sin errores (comprueba que tu entorno vale).
 3. Pide a Fran el inicio de sesión de Google Cloud (§5) y mira los registros de la función de avisos (§4, punto 2).
 4. Pregúntale qué quiere hacer hoy. Si pide algo contrario a la norma de app limpia (§1), díselo antes.
+
+## REGLA: no subir a `main` a cada rato (créditos de Netlify) — pedido de Fran el 27/11/2026
+El proyecto de Netlify «tareasdelasemana» está enlazado a este repo: **cada push a `main` gasta unos 15 créditos** (el plan gratis tiene 300 por ciclo,
+y a los 5 días ya iba por el 50 %). Si se acaban, Netlify pausa las webs. Por tanto: trabaja y prueba en la rama de trabajo, **sube a `main` solo cuando
+haya un bloque terminado (como mucho una vez al día), salvo arreglos urgentes**, y nunca para «probar». (Pendiente de decidir con Fran: desenlazar
+ese proyecto de Netlify del repo, porque la pizarra y la espejo se sirven desde GitHub Pages.)
