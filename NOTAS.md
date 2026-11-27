@@ -137,3 +137,4 @@ AppSheet: la copia de AppSheet a la app agrícola reconoce a los trabajadores po
 y crearía duplicados. Cuando se deje AppSheet, renombrar en la app agrícola (tabla
 `trabajadores`) con los nombres de la pizarra. La pizarra y la app agrícola se emparejan
 por identificador (`pizarra_trabajadores`), así que eso no se rompe.
+- Acceso directo: botón 📲 en la cabecera de la espejo y en Ajustes > Avisos de la pizarra (componente `InstalarApp`): detecta ya instalada / Android (lanza la instalación) / iPhone-Safari (3 pasos) / iPhone sin Safari (pide abrir en Safari). En iPhone Apple no permite instalar desde código.

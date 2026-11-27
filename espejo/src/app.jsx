@@ -68,6 +68,53 @@ function VisorFotos({ fotos, indice, onCambiar, onCerrar }) {
   );
 }
 
+// ===== ACCESO DIRECTO EN LA PANTALLA DE INICIO =====
+// Guarda el aviso de instalación de Android/Chrome para poder lanzarlo desde un botón.
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window.__avisoInstalar = e; });
+
+function InstalarApp() {
+  const [, redibujar] = useState(0);
+  useEffect(() => {
+    const f = () => redibujar(n => n + 1);
+    window.addEventListener('beforeinstallprompt', f);
+    window.addEventListener('appinstalled', f);
+    return () => { window.removeEventListener('beforeinstallprompt', f); window.removeEventListener('appinstalled', f); };
+  }, []);
+  const ua = navigator.userAgent || '';
+  const instalada = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const safari = !/CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(ua);
+  const instalar = async () => {
+    const e = window.__avisoInstalar; if (!e) return;
+    e.prompt(); try { await e.userChoice; } catch (x) {}
+    window.__avisoInstalar = null; redibujar(n => n + 1);
+  };
+  const paso = (n, t) => <div className="flex gap-2 items-start"><span className="shrink-0 w-6 h-6 rounded-full bg-emerald-600 text-white text-sm font-bold flex items-center justify-center">{n}</span><span className="text-sm text-slate-700">{t}</span></div>;
+  if (instalada) return <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 text-sm rounded-lg p-3">✅ La app ya está en la pantalla de inicio de este móvil.</div>;
+  return (
+    <div className="bg-white border rounded-lg p-3 shadow-sm space-y-2.5">
+      <div className="font-bold text-slate-800">📲 Poner la app en la pantalla del móvil</div>
+      {window.__avisoInstalar ? (
+        <button onClick={instalar} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg text-base">Añadir a la pantalla de inicio</button>
+      ) : ios && !safari ? (
+        <div className="text-sm text-slate-700">En el iPhone solo se puede desde <b>Safari</b>. Abre este mismo enlace en Safari (el icono de la brújula azul) y vuelve a pulsar aquí.</div>
+      ) : ios ? (
+        <div className="space-y-2">
+          {paso(1, <>Pulsa el botón <b>Compartir</b> de Safari (el cuadrado con una flecha hacia arriba ⬆️, abajo en el centro).</>)}
+          {paso(2, <>Desliza hacia abajo y pulsa <b>«Añadir a pantalla de inicio»</b>.</>)}
+          {paso(3, <>Pulsa <b>«Añadir»</b> arriba a la derecha. Ya tendrás el icono en el móvil.</>)}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {paso(1, <>Pulsa el menú del navegador (los tres puntos ⋮).</>)}
+          {paso(2, <>Pulsa <b>«Instalar aplicación»</b> o <b>«Añadir a pantalla de inicio»</b>.</>)}
+        </div>
+      )}
+    </div>
+  );
+}
+// ===== FIN ACCESO DIRECTO =====
+
 function App() {
   const [user, setUser] = useState(null);
   const [fincas, setFincas] = useState([]);
@@ -76,6 +123,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [diaHoy, setDiaHoy] = useState(null);
   const [vista, setVista] = useState('hoy'); // 'hoy' o 'manana'
+  const [verInstalar, setVerInstalar] = useState(false);
 
   
   const [viewTaskMenu, setViewTaskMenu] = useState(null);
@@ -191,10 +239,21 @@ function App() {
             </button>
           ))}
         </div>
+        <div className="flex gap-2">
+        <button onClick={() => setVerInstalar(true)} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm text-slate-700" title="Poner la app en la pantalla del móvil">📲</button>
         <button onClick={() => { if (confirm('¿Cerrar sesión en este dispositivo?')) window.FirebaseAPI.signOut(window.FirebaseAPI.auth); }} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm text-slate-700" title="Cerrar sesión">
           🚪
         </button>
+        </div>
       </header>
+      {verInstalar && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setVerInstalar(false)}>
+          <div className="bg-slate-50 rounded-xl p-3 w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+            <InstalarApp />
+            <button onClick={() => setVerInstalar(false)} className="w-full bg-slate-200 hover:bg-slate-300 font-bold py-2 rounded-lg">Cerrar</button>
+          </div>
+        </div>
+      )}
 
       {/* TABLERO CENTRAL ÚNICO (Ocupa el 100% de la pantalla para ver solo hoy) */}
       <div className="flex-1 overflow-y-auto p-4 flex justify-center bg-slate-100">

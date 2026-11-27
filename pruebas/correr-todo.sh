@@ -24,6 +24,7 @@ echo "== t5 (fotos en pizarra y espejo)"; FECHA=2026-11-17T09:00:00 DATOS="$PWD/
 echo "== t12 (notificaciones push en Ajustes)"; node t12.js
 echo "== t13 (trabajadores de baja)"; node t13.js
 echo "== t14 (Ajustes > Trabajadores con appero)"; node t14.js
+echo "== t15 (acceso directo en la pantalla de inicio)"; node t15.js
 echo "== envío de notificaciones (servicio falso + descifrado)"
 if python3 -c "import pywebpush, google.auth" 2>/dev/null; then python3 probar_push.py | tail -3; python3 probar_trabajadores.py | tail -3; python3 probar_sync.py | tail -3; else echo "(sin pywebpush: pip install pywebpush google-auth requests; se salta)"; fi
 echo "Lo importante: ninguna línea que empiece por ERR, y los resultados iguales que la vez anterior."
