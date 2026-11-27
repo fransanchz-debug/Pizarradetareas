@@ -321,6 +321,30 @@ def sincronizar_trabajadores(s, config, lista=None):
         print(f"Trabajadores sincronizados: {len(crear)} altas, {len(cambios)} cambios.")
 
 
+def simular_trabajadores():
+    """SOLO LEE: escribe en los registros (privados de Google) qué haría la sincronización con la lista real de appero."""
+    s = sesion()
+    lista = leer_appero()
+    docs = leer_coleccion(s, "workers")
+    crear, cambios = planificar_trabajadores(lista, docs, int(time.time() * 1000))
+    por_id = {d["id"]: d for d in docs}
+    nombre = lambda i: por_id[i].get("name", "?")
+    bajas = [(i, c) for i, c in cambios if c.get("activo") is False]
+    print(f"SIMULACIÓN appero={len(lista)} ({sum(1 for t in lista if t['activo'])} activos) pizarra={len(docs)} ({sum(1 for d in docs if d.get('activo') is not False)} activos)")
+    def linea(titulo, nombres):  # una sola línea por resultado (el registro de Google separa los argumentos de print)
+        print(f"SIMULACIÓN {titulo} ({len(nombres)}): " + "; ".join(nombres))
+    linea("altas nuevas", [t["nombre"] for t in crear])
+    linea(f"bajas (el freno salta a partir de {SYNC_MAX_BAJAS + 1})", [nombre(i) for i, _ in bajas])
+    linea("reactivaciones", [nombre(i) for i, c in cambios if c.get("activo") is True])
+    linea("solo se vinculan", [nombre(i) for i, c in cambios if "activo" not in c])
+    linea("nombres distintos (no se tocan)", [
+        f"{d.get('name')} <-> {t['nombre']}" for d in docs for t in lista
+        if (t.get("id_pizarra") == d["id"] or t["id"] == d.get("agricolaId")) and normalizar(t["nombre"]) != normalizar(d.get("name"))])
+    linea("activos en la pizarra que appero no conoce", [
+        d.get("name") for d in docs if d.get("activo") is not False
+        and not any(t.get("id_pizarra") == d["id"] or t["id"] == d.get("agricolaId") for t in lista)])
+
+
 # ---------- Cuadrillas ----------
 
 def normalizar(texto):
@@ -652,6 +676,9 @@ def main(forzar_emergencia=False, forzar_recordatorio=False, forzar_envio=False)
 
 def avisos(request):
     """Punto de entrada de la función de Google Cloud (la llama Cloud Scheduler)."""
+    if request.args.get("simular_trabajadores"):
+        simular_trabajadores()
+        return "simulación hecha"
     main()
     return "ok"
 
