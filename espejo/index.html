@@ -18,7 +18,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, collection, onSnapshot, query, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     // CLAVES PERSONALES
     const firebaseConfig = {
@@ -35,7 +35,7 @@
     const db = getFirestore(app);
 
     window.FirebaseAPI = {
-      auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, collection, onSnapshot, query
+      auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, collection, onSnapshot, query, doc, setDoc
     };
     
     window.dispatchEvent(new Event('firebase-modules-loaded'));

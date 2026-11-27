@@ -34,9 +34,14 @@ service cloud.firestore {
       allow read, write: if esUsuarioAutorizado() && request.auth.uid == uid;
     }
 
-    // Solo lectura para el encargado (app espejo)
+    // Solo lectura para el encargado (app espejo). 'publicados' = qué días ha publicado Fran y qué ha cambiado.
     match /artifacts/ecologicos-almeria-v1/{coleccion}/{id} {
-      allow read: if esEncargado() && coleccion in ['board', 'fincas', 'workers'];
+      allow read: if esEncargado() && coleccion in ['board', 'fincas', 'workers', 'publicados'];
+    }
+
+    // Cada cuenta de la espejo guarda y lee SOLO su propio aparato para las notificaciones.
+    match /artifacts/ecologicos-almeria-v1/avisos/{uid} {
+      allow read, write: if esEncargado() && request.auth.uid == uid;
     }
 
   }

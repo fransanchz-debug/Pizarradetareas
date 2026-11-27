@@ -9,12 +9,13 @@ export const query = (x, ...w) => ({ ...x, filtros: w });
 export const onSnapshot = (ref, cb) => {
   setTimeout(() => {
     if (ref.kind === 'col') {
-      const filas = (D[ref.name] || []).filter(d => (ref.filtros || []).every(f => f.op === '>=' ? (d[f.campo] || '') >= f.valor : d[f.campo] === f.valor));
+      const fuente = ref.name === 'publicados' ? Object.entries(D.pubs || {}).map(([id, v]) => ({ id, ...v })) : (D[ref.name] || []);
+      const filas = fuente.filter(d => (ref.filtros || []).every(f => f.op === '>=' ? (d[f.campo] || '') >= f.valor : d[f.campo] === f.valor));
       window.__lecturas = (window.__lecturas || {}); window.__lecturas[ref.ruta.replace('artifacts/ecologicos-almeria-v1/', '')] = filas.length;
       const items = filas.map(d => { const { id, ...rest } = d; return { id, data: () => rest }; });
       cb({ forEach: f => items.forEach(f), size: items.length });
     } else {
-      const v = ref.col === 'config' ? conf[ref.id] : ref.col === 'avisos' ? (window.__avisos !== undefined ? window.__avisos : avisos[ref.id]) : null;
+      const v = ref.col === 'publicados' ? (D.pubs ? D.pubs[ref.id] : { fecha: ref.id, publicadoEn: 1, cambios: {}, quitadas: [] }) : ref.col === 'config' ? conf[ref.id] : ref.col === 'avisos' ? (window.__avisos !== undefined ? window.__avisos : avisos[ref.id]) : null;
       cb({ exists: () => !!v, data: () => v });
     }
   }, 100);

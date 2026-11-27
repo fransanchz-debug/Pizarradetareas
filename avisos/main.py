@@ -52,6 +52,13 @@ CUENTAS_AVISOS = {
     "LHagvsoFmJU9jHOV9TilSCY81r92",  # hermano de Fran
 }
 
+# Cuentas de la espejo (encargado y trabajador): reciben solo el aviso de «tareas listas» y de cambios.
+CUENTAS_ESPEJO = {
+    "a3RUHr2UIQVpM2w4eleC8GE7lZ53",  # encargado (Fabio)
+    "zuo3LqOv04NJFIwSbJt7cWpifk82",  # Mory
+}
+URL_ESPEJO = "https://fransanchz-debug.github.io/Pizarradetareas/espejo/"
+
 PROYECTO_NUM = "669734412138"
 URL_APP = "https://fransanchz-debug.github.io/Pizarradetareas/"
 # Contacto que exige el estándar de las notificaciones. Genérico a propósito: no se envían datos personales a
@@ -146,6 +153,12 @@ def actualizar_doc(s, ruta, campos):
     r.raise_for_status()
 
 
+def borrar_doc(s, ruta):
+    r = s.delete(f"{ROOT}/{ruta}")
+    if r.status_code != 404:
+        r.raise_for_status()
+
+
 # ---------- Notificaciones push (Web Push + VAPID) ----------
 
 _vapid = None
@@ -168,8 +181,8 @@ def vapid():
     return _vapid
 
 
-def aviso_push(sub, titulo, cuerpo, etiqueta, urgente=False):
-    datos = json.dumps({"titulo": titulo, "cuerpo": cuerpo, "etiqueta": etiqueta, "url": URL_APP}, ensure_ascii=False)
+def aviso_push(sub, titulo, cuerpo, etiqueta, urgente=False, url=URL_APP):
+    datos = json.dumps({"titulo": titulo, "cuerpo": cuerpo, "etiqueta": etiqueta, "url": url}, ensure_ascii=False)
     webpush(
         subscription_info={"endpoint": sub["endpoint"], "keys": sub["keys"]},
         data=datos, vapid_private_key=vapid(), vapid_claims={"sub": VAPID_SUB},  # claims nuevo en cada envío
@@ -197,13 +210,16 @@ def confirmar_nuevos(s):
     """Primer aviso a cada aparato recién activado (y limpia los que ya no existen)."""
     for a in leer_coleccion(s, "avisos"):
         subs = a.get("subs") or []
-        if a["id"] not in CUENTAS_AVISOS or all(x.get("confirmada") for x in subs):
+        if (a["id"] not in CUENTAS_AVISOS and a["id"] not in CUENTAS_ESPEJO) or all(x.get("confirmada") for x in subs):
             continue
         nuevas = []
         for sub in subs:
             if not sub.get("confirmada"):
                 try:
-                    aviso_push(sub, "✅ Notificaciones activadas", "Aquí te llegarán los avisos de la pizarra.", "activadas")
+                    if a["id"] in CUENTAS_ESPEJO:
+                        aviso_push(sub, "✅ Notificaciones activadas", "Te avisaremos cuando las tareas estén listas o cambien.", "activadas", url=URL_ESPEJO)
+                    else:
+                        aviso_push(sub, "✅ Notificaciones activadas", "Aquí te llegarán los avisos de la pizarra.", "activadas")
                     sub = {**sub, "confirmada": True}
                 except Exception as e:
                     estado = estado_envio(e)
@@ -510,18 +526,19 @@ class Datos:
         return [f"\n🏠 <b>Faltan{hoy}:</b> " + html.escape(texto)]
 
 
-def enviar(s, texto, etiqueta="aviso", urgente=False):
-    """Manda el mensaje a todos los aparatos de Fran y su hermano; quita los que ya no existen."""
+def enviar(s, texto, etiqueta="aviso", urgente=False, cuentas=CUENTAS_AVISOS, url=URL_APP):
+    """Manda el mensaje a todos los aparatos de las cuentas indicadas (por defecto Fran y su hermano); quita los que ya no existen.
+    Devuelve cuántos avisos se han enviado."""
     titulo, cuerpo = partir(texto)
     enviados = 0
     for a in leer_coleccion(s, "avisos"):
         subs = a.get("subs") or []
-        if a["id"] not in CUENTAS_AVISOS or not subs:
+        if a["id"] not in cuentas or not subs:
             continue
         vivas = []
         for sub in subs:
             try:
-                aviso_push(sub, titulo, cuerpo, etiqueta, urgente)
+                aviso_push(sub, titulo, cuerpo, etiqueta, urgente, url)
                 enviados += 1
             except Exception as e:
                 estado = estado_envio(e)
@@ -533,6 +550,20 @@ def enviar(s, texto, etiqueta="aviso", urgente=False):
         if len(vivas) != len(subs):
             actualizar_doc(s, f"avisos/{a['id']}", {"subs": vivas})
     print(f"Avisos enviados: {enviados}.")
+    return enviados
+
+
+def enviar_pendientes(s):
+    """Avisos que Fran ha pedido desde la pizarra («Tareas listas» / «Avisar cambios») para Fabio y Mory."""
+    ahora = int(time.time() * 1000)
+    for p in leer_coleccion(s, "avisosPendientes"):
+        if p.get("enviado"):
+            if ahora - int(p.get("enviadoEn") or ahora) > 3 * 86400000:  # limpieza: se borran a los 3 días
+                borrar_doc(s, f"avisosPendientes/{p['id']}")
+            continue
+        titulo, cuerpo = str(p.get("titulo") or "Tareas").strip(), str(p.get("cuerpo") or "").strip()
+        n = enviar(s, f"{titulo}\n{cuerpo}", f"tareas-{p.get('fecha', '')}", urgente=True, cuentas=CUENTAS_ESPEJO, url=URL_ESPEJO)
+        actualizar_doc(s, f"avisosPendientes/{p['id']}", {"enviado": True, "enviadoEn": ahora, "aparatos": n})
 
 
 def recordatorio(s, dia):
@@ -585,7 +616,8 @@ def emergencia(s, dia):
     sin_cuadrilla = [t for t in tareas if not t.get("workerIds")]
     sin_tarea = d.sin_tarea(tareas, faltan=faltan)
     baja = d.lineas_baja(fecha)
-    if not copias and not sin_cuadrilla and not sin_tarea and not baja:
+    sin_publicar = leer_doc(s, f"publicados/{fecha}") is None
+    if not copias and not sin_cuadrilla and not sin_tarea and not baja and not sin_publicar:
         print("Todo en orden: no se avisa.")
         return
 
@@ -600,6 +632,8 @@ def emergencia(s, dia):
         lineas.append("\n⚠️ <b>Sin tarea asignada hoy:</b> " + html.escape(", ".join(sin_tarea)))
     lineas += d.lineas_faltas(faltan, " hoy")
     lineas += baja
+    if sin_publicar:
+        lineas.append("\n📣 <b>Las tareas de hoy NO están publicadas:</b> Fabio y Mory no las ven. Pulsa «Tareas listas» en la pizarra.")
     enviar(s, "\n".join(lineas), "emergencia", urgente=True)
 
 
@@ -659,6 +693,10 @@ def main(forzar_emergencia=False, forzar_recordatorio=False, forzar_envio=False)
     s = sesion()
     config = leer_doc(s, "config/general") or {}
 
+    try:
+        enviar_pendientes(s)  # «Tareas listas» y cambios pedidos desde la pizarra
+    except Exception as e:
+        print(f"No se pudieron enviar los avisos pendientes: {type(e).__name__}")
     try:
         confirmar_nuevos(s)  # primer aviso a los aparatos recién activados
     except Exception as e:  # un fallo aquí no debe parar la copia de cuadrillas ni el envío de horas

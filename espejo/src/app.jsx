@@ -115,6 +115,68 @@ function InstalarApp() {
 }
 // ===== FIN ACCESO DIRECTO =====
 
+// ===== AVISOS DE «TAREAS LISTAS» EN ESTE APARATO =====
+const VAPID_PUBLICA = "BAh47kyd20EM3ia-K5WnVTT6xlRLoI4lHCJbq744AtAK9iVGoHX8Xm8F-BoR59JJLFu_xXLziz-7Y3jxXKGSN6E";
+const clavePush = (b64) => {
+  const raw = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+};
+const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const appInstalada = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+
+function AvisosEspejo({ user, miAviso }) {
+  const [estado, setEstado] = useState('cargando'); // cargando | activo | inactivo | instalar | denegado | noSoportado
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    (async () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) { setEstado(esIOS() && !appInstalada() ? 'instalar' : 'noSoportado'); return; }
+      if (Notification.permission === 'denied') { setEstado('denegado'); return; }
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        const sub = reg && await reg.pushManager.getSubscription();
+        setEstado(sub && ((miAviso && miAviso.subs) || []).some(x => x.endpoint === sub.endpoint) ? 'activo' : (esIOS() && !appInstalada() ? 'instalar' : 'inactivo'));
+      } catch (e) { setEstado('inactivo'); }
+    })();
+  }, [miAviso]);
+  const activar = async () => {
+    setOcupado(true); setError(null);
+    try {
+      const permiso = await Notification.requestPermission(); // debe ser lo primero: el iPhone lo exige al tocar el botón
+      if (permiso !== 'granted') { setEstado(permiso === 'denied' ? 'denegado' : 'inactivo'); return; }
+      const reg = await navigator.serviceWorker.register('sw.js');
+      await navigator.serviceWorker.ready;
+      const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: clavePush(VAPID_PUBLICA) });
+      const j = sub.toJSON();
+      const otras = ((miAviso && miAviso.subs) || []).filter(x => x.endpoint !== j.endpoint);
+      const aparato = esIOS() ? 'iPhone/iPad' : /android/i.test(navigator.userAgent) ? 'Android' : 'Ordenador';
+      const { db, setDoc, doc } = window.FirebaseAPI;
+      await setDoc(doc(db, 'artifacts', APP_ID, 'avisos', user.uid), { subs: [...otras, { endpoint: j.endpoint, keys: j.keys, creada: Date.now(), confirmada: false, aparato }] }, { merge: true });
+      setEstado('activo');
+    } catch (e) { console.error('Error al activar las notificaciones:', e); setError('No se han podido activar. Comprueba la conexión y vuelve a intentarlo.'); }
+    finally { setOcupado(false); }
+  };
+  return (
+    <div className="bg-white border rounded-lg p-3 shadow-sm space-y-2">
+      <div className="font-bold text-slate-800">🔔 Avisos de las tareas</div>
+      {estado === 'cargando' && <p className="text-sm text-slate-500">Comprobando…</p>}
+      {estado === 'activo' && <>
+        <p className="text-sm text-emerald-700 font-bold">✅ Activados. Te avisaremos cuando las tareas estén listas o cambien.</p>
+        {((miAviso && miAviso.subs) || []).some(x => !x.confirmada) && <p className="text-sm text-amber-700">⏳ En un par de minutos te llegará un aviso de confirmación.</p>}
+      </>}
+      {estado === 'inactivo' && <>
+        <p className="text-sm text-slate-600">Para enterarte cuando estén listas las tareas o cambien.</p>
+        <button onClick={activar} disabled={ocupado} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-3 rounded-lg text-base">{ocupado ? 'Activando…' : 'Activar avisos'}</button>
+      </>}
+      {estado === 'instalar' && <p className="text-sm text-slate-700">En el iPhone, primero pon la app en la pantalla de inicio (arriba) y ábrela desde el icono. Después vuelve aquí y pulsa «Activar avisos».</p>}
+      {estado === 'denegado' && <p className="text-sm text-slate-700">Los avisos están bloqueados. Actívalos en el móvil: <b>iPhone</b> → Ajustes → Notificaciones → esta app. <b>Android</b> → mantén pulsado el icono → Información → Notificaciones.</p>}
+      {estado === 'noSoportado' && <p className="text-sm text-slate-700">Este navegador no admite avisos. Prueba con Safari (iPhone) o Chrome (Android) y la app en la pantalla de inicio.</p>}
+      {error && <p className="text-sm text-red-700 font-semibold">{error}</p>}
+    </div>
+  );
+}
+// ===== FIN AVISOS =====
+
 function App() {
   const [user, setUser] = useState(null);
   const [fincas, setFincas] = useState([]);
@@ -124,6 +186,9 @@ function App() {
   const [diaHoy, setDiaHoy] = useState(null);
   const [vista, setVista] = useState('hoy'); // 'hoy' o 'manana'
   const [verInstalar, setVerInstalar] = useState(false);
+  const [publicados, setPublicados] = useState({}); // fecha -> {publicadoEn, cambios, quitadas...}; sin documento = día sin publicar
+  const [publicadosListos, setPublicadosListos] = useState({});
+  const [miAviso, setMiAviso] = useState(null);
 
   
   const [viewTaskMenu, setViewTaskMenu] = useState(null);
@@ -211,8 +276,23 @@ function App() {
       setWorkers(items.sort((a, b) => a.name.localeCompare(b.name)));
     });
 
-    return () => { unsubFincas(); unsubBoard(); unsubWorkers(); };
+    const { doc } = window.FirebaseAPI;
+    const unsubMiAviso = onSnapshot(doc(db, 'artifacts', APP_ID, 'avisos', user.uid), (snap) => setMiAviso(snap.exists() ? snap.data() : null), () => {});
+
+    return () => { unsubFincas(); unsubBoard(); unsubWorkers(); unsubMiAviso(); };
   }, [user]);
+
+  // Qué días ha publicado Fran (y qué ha cambiado desde entonces)
+  const fechaHoy = diaHoy && diaHoy.hoy.fecha, fechaManana = diaHoy && diaHoy.manana.fecha;
+  useEffect(() => {
+    if (!user || !window.FirebaseAPI || !fechaHoy) return;
+    const { db, doc, onSnapshot } = window.FirebaseAPI;
+    const bajas = [fechaHoy, fechaManana].map(f => onSnapshot(doc(db, 'artifacts', APP_ID, 'publicados', f), (snap) => {
+      setPublicados(p => ({ ...p, [f]: snap.exists() ? snap.data() : null }));
+      setPublicadosListos(p => ({ ...p, [f]: true }));
+    }, () => setPublicadosListos(p => ({ ...p, [f]: true }))));
+    return () => bajas.forEach(b => b());
+  }, [user, fechaHoy, fechaManana]);
 
   // Mismo patrón de nombres que la pizarra («Finca 1y2» → «Finca 1 y 2», etiqueta «F1-2»)
   const nombreFinca = (n) => (n || '?').replace(/\s*y\s*/gi, ' y ').replace(/\s+/g, ' ').trim();
@@ -225,6 +305,12 @@ function App() {
   // Tareas del día elegido (hoy o mañana), por fecha
   const dia = diaHoy ? diaHoy[vista] : null;
   const tareasDelDia = dia ? boardTasks.filter(t => (t.targetDateStr || t.dateString) ? (t.targetDateStr || t.dateString) === dia.fecha : t.dayId === dia.id).sort((a, b) => (a.order || 0) - (b.order || 0)) : [];
+
+  const pub = dia ? publicados[dia.fecha] : null;
+  const diaPublicado = !!pub;
+  const cambiosDia = (pub && pub.cambios) || {};
+  const quitadasDia = (pub && pub.quitadas) || [];
+  const horaDe = (ms) => new Date(ms).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden bg-slate-100">
@@ -240,7 +326,7 @@ function App() {
           ))}
         </div>
         <div className="flex gap-2">
-        <button onClick={() => setVerInstalar(true)} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm text-slate-700" title="Poner la app en la pantalla del móvil">📲</button>
+        <button onClick={() => setVerInstalar(true)} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm text-slate-700" title="Poner la app en la pantalla del móvil y activar los avisos">📲</button>
         <button onClick={() => { if (confirm('¿Cerrar sesión en este dispositivo?')) window.FirebaseAPI.signOut(window.FirebaseAPI.auth); }} className="bg-slate-100 hover:bg-slate-200 px-2 py-1.5 rounded-lg text-sm text-slate-700" title="Cerrar sesión">
           🚪
         </button>
@@ -250,6 +336,7 @@ function App() {
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setVerInstalar(false)}>
           <div className="bg-slate-50 rounded-xl p-3 w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
             <InstalarApp />
+            <AvisosEspejo user={user} miAviso={miAviso} />
             <button onClick={() => setVerInstalar(false)} className="w-full bg-slate-200 hover:bg-slate-300 font-bold py-2 rounded-lg">Cerrar</button>
           </div>
         </div>
@@ -268,11 +355,25 @@ function App() {
               <div className={`text-sm font-bold mt-1 uppercase tracking-widest ${vista === 'hoy' ? 'text-emerald-800' : 'text-blue-800'}`}>
                 {vista === 'hoy' ? 'Jornada en curso' : 'Planificación de mañana'}
               </div>
+              {diaPublicado && pub.cambiosEn && <div className="text-xs font-bold mt-1 text-amber-800">✏️ Cambios avisados a las {horaDe(pub.cambiosEn)}</div>}
             </div>
             
             {/* Lista de Tareas de Hoy */}
             <div className="flex-1 p-3 space-y-3 overflow-y-auto pb-6 bg-slate-50/50">
-              {tareasDelDia.map(task => {
+              {!diaPublicado && (
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 p-6 text-center">
+                  <span className="text-4xl mb-3">{publicadosListos[dia.fecha] ? '⏳' : '…'}</span>
+                  <span className="text-lg font-bold text-slate-600">{publicadosListos[dia.fecha] ? `Aún no están publicadas las tareas de ${vista === 'hoy' ? 'hoy' : 'mañana'}` : 'Cargando…'}</span>
+                  {publicadosListos[dia.fecha] && <span className="text-sm mt-1">Te avisaremos cuando estén listas.</span>}
+                </div>
+              )}
+              {diaPublicado && quitadasDia.length > 0 && (
+                <div className="bg-red-50 border-2 border-red-200 rounded-lg p-3 text-sm text-red-900">
+                  <div className="font-black">🗑️ Tareas quitadas:</div>
+                  {quitadasDia.map((q, i) => <div key={i} className="line-through">{q}</div>)}
+                </div>
+              )}
+              {diaPublicado && tareasDelDia.map(task => {
                 const finca = getFincaData(task.fincaId);
                 const hasNotes = task.notes && task.notes.trim().length > 0;
                 const taskWorkers = workers.filter(w => (task.workerIds || []).includes(w.id));
@@ -289,6 +390,7 @@ function App() {
                          <div className="flex justify-between items-center mb-1.5">
                            <div className="flex gap-2 items-center">
                              <span className={`text-xs font-black px-2 py-0.5 rounded bg-white border shadow-sm text-slate-700 ${finca.color.split(' ')[1]}`}>{fincaEtiqueta}</span>
+                             {cambiosDia[task.id] && <span className={`text-xs font-black px-2 py-0.5 rounded shadow-sm text-white ${cambiosDia[task.id] === 'nueva' ? 'bg-emerald-600' : 'bg-amber-500'}`}>{cambiosDia[task.id] === 'nueva' ? 'NUEVA' : 'CAMBIADA'}</span>}
                            </div>
                            <span className="flex items-center gap-2">
                              {(task.fotos || []).length > 0 && <span className="text-sm font-bold text-slate-600">📷 {task.fotos.length}</span>}
@@ -315,7 +417,7 @@ function App() {
                   </div>
                 );
               })}
-              {tareasDelDia.length === 0 && (
+              {diaPublicado && tareasDelDia.length === 0 && (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 p-6 text-center">
                   <span className="text-4xl mb-3">🏖️</span>
                   <span className="text-lg font-bold text-slate-500">No hay tareas asignadas para {vista === 'hoy' ? 'hoy' : 'mañana'}</span>

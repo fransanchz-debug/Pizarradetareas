@@ -138,3 +138,14 @@ y crearía duplicados. Cuando se deje AppSheet, renombrar en la app agrícola (t
 `trabajadores`) con los nombres de la pizarra. La pizarra y la app agrícola se emparejan
 por identificador (`pizarra_trabajadores`), así que eso no se rompe.
 - Acceso directo: botón 📲 en la cabecera de la espejo y en Ajustes > Avisos de la pizarra (componente `InstalarApp`): detecta ya instalada / Android (lanza la instalación) / iPhone-Safari (3 pasos) / iPhone sin Safari (pide abrir en Safari). En iPhone Apple no permite instalar desde código.
+
+## «Tareas listas» (aviso a Fabio y Mory) — desde el 27/11/2026
+- Fran pulsa **«📣 Tareas de hoy/mañana listas»** (franja verde bajo la cabecera de la pizarra). Qué día: antes de `horaSalida` → hoy; desde la salida
+  hasta las 24:00 → mañana; pasada la medianoche → hoy. Se guarda `publicados/{fecha}` (firma de cada tarea = lo que ya vieron, `cambios`, `quitadas`)
+  y se crea `avisosPendientes/{id}`; la función (cada 2 min, `enviar_pendientes`) lo manda por push a `CUENTAS_ESPEJO` (Fabio y Mory) con la dirección de la espejo.
+- **La espejo solo enseña los días publicados** («Aún no están publicadas…»). Si un día no se publica, la alerta de emergencia lo avisa a Fran.
+- Cambios tras publicar: la pizarra compara las tareas con la firma y muestra «N cambios sin avisar · Avisar a Fabio y Mory» (no pregunta en cada cambio).
+  Al avisar se acumulan `cambios` (nueva/cambiada) y `quitadas`, que la espejo marca (NUEVA / CAMBIADA / tachadas). La firma incluye finca, texto, notas,
+  prioridad, trabajadores y nº de fotos. OJO: la copia automática de cuadrillas de la emergencia cuenta como cambio si el día ya estaba publicado.
+- Los de la espejo activan sus avisos en 📲 (también instalan la app). Reglas: leen `publicados` y su propio `avisos/{uid}` (NADA más). `espejo/sw.js` es copia de `sw.js`.
+- Al estrenarlo se creó a mano `publicados/2026-11-27` (campo `semilla`) para que hoy no se quedara vacío.

@@ -149,6 +149,20 @@ function InstalarApp() {
 }
 // ===== FIN ACCESO DIRECTO =====
 
+// ===== TAREAS LISTAS (publicar el día a Fabio y Mory) =====
+// publicados/{fecha}: lo que los trabajadores ya han visto (firma de cada tarea), los cambios avisados desde entonces
+// (cambios: id -> 'nueva'|'cambiada'; quitadas: nombres) y cuándo. La espejo solo enseña los días publicados.
+const firmaTarea = (t) => JSON.stringify([t.fincaId || '', (t.description || '').trim(), (t.notes || '').trim(), t.stars || 0, [...(t.workerIds || [])].sort(), (t.fotos || []).length]);
+const firmasDe = (tareas) => Object.fromEntries(tareas.map(t => [t.id, firmaTarea(t)]));
+const calcularCambios = (tareas, pub) => {
+  const firma = (pub && pub.firma) || {};
+  return {
+    nuevas: tareas.filter(t => firma[t.id] === undefined),
+    cambiadas: tareas.filter(t => firma[t.id] !== undefined && firma[t.id] !== firmaTarea(t)),
+    quitadas: Object.keys(firma).filter(id => !tareas.some(t => t.id === id)),
+  };
+};
+
 function App() {
   const [user, setUser] = useState(null);
   const [fincas, setFincas] = useState([]);
@@ -166,6 +180,8 @@ function App() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsTab, setSettingsTab] = useState('fincas'); 
   const [avisosConfig, setAvisosConfig] = useState({});
+  const [publicados, setPublicados] = useState({}); // fecha -> documento publicados/{fecha}
+  const [publicando, setPublicando] = useState(false);
   const [miAviso, setMiAviso] = useState(null);
   const [avisosEdit, setAvisosEdit] = useState({});
   const [editingFinca, setEditingFinca] = useState(null);
@@ -341,6 +357,15 @@ function App() {
   // Histórico reciente (de ayer en adelante): basta para repetir el día de ayer y para la limpieza.
   // El histórico completo solo se descarga al abrir la ventana de Histórico.
   const hoyStr = (dias.find(d => d.esHoy) || {}).dateString;
+  useEffect(() => {
+    if (!user || !window.FirebaseAPI || !hoyStr) return;
+    const { db, collection, query, where, onSnapshot } = window.FirebaseAPI;
+    return onSnapshot(query(collection(db, 'artifacts', APP_ID, 'publicados'), where('fecha', '>=', hoyStr)), (snapshot) => {
+      const m = {};
+      snapshot.forEach(d => { m[d.id] = { ...d.data(), id: d.id }; });
+      setPublicados(m);
+    });
+  }, [user, hoyStr]);
   useEffect(() => {
     if (!user || !window.FirebaseAPI || !hoyStr) return;
     const { db, collection, query, where, onSnapshot } = window.FirebaseAPI;
@@ -915,6 +940,54 @@ function App() {
   // Nombres de finca con el mismo patrón en pantalla («Finca 1y2» → «Finca 1 y 2»; etiqueta «F1-2»).
   // No se cambia lo guardado: la app agrícola reconoce las fincas por su nombre exacto.
   const nombreFinca = (n) => (n || '?').replace(/\s*y\s*/gi, ' y ').replace(/\s+/g, ' ').trim();
+  // ----- Tareas listas: avisar a Fabio y Mory -----
+  const diaPublicable = (() => { // antes de la hora de salida: el día de hoy; después (hasta las 12 de la noche): mañana
+    const ahora = new Date(); const [h, m] = (avisosConfig.horaSalida || '17:00').split(':').map(Number);
+    const pasada = ahora.getHours() * 60 + ahora.getMinutes() >= h * 60 + m;
+    const i = dias.findIndex(d => d.esHoy);
+    return i < 0 ? null : (pasada ? dias.find(d => d.dateString === getLocalIsoDate(new Date(Date.now() + 86400000))) : dias[i]) || null;
+  })();
+  const textoDia = (dia) => dia.esHoy ? 'hoy' : dia.dateString === getLocalIsoDate(new Date(Date.now() + 86400000)) ? 'mañana' : `el ${dia.name.toLowerCase()} ${dia.numeroDia}`;
+  const etiquetaTarea = (t) => `${nombreFinca((fincas.find(f => f.id === t.fincaId) || {}).name)} · ${t.description}`;
+  const tareasPublicables = (dia) => boardTasks.filter(t => (t.targetDateStr || t.dateString) === dia.dateString).sort((a, b) => (a.order || 0) - (b.order || 0)); // las mismas que ve la espejo
+  const pedirAviso = async (tipo, fecha, titulo, cuerpo) => {
+    const { db, addDoc, collection } = window.FirebaseAPI;
+    await addDoc(collection(db, 'artifacts', APP_ID, 'avisosPendientes'), { tipo, fecha, titulo, cuerpo, creado: Date.now(), enviado: false });
+  };
+  const publicarDia = async (dia) => {
+    const tareas = tareasPublicables(dia);
+    if (tareas.length === 0) { alert('Este día todavía no tiene tareas.'); return; }
+    const sinCuadrilla = tareas.filter(t => !(t.workerIds || []).length).length;
+    if (!confirm(`¿Avisar a Fabio y Mory de que ya pueden consultar las tareas de ${textoDia(dia)}?\n\n${tareas.length} tareas${sinCuadrilla ? ` (${sinCuadrilla} sin trabajadores asignados)` : ''}.`)) return;
+    setPublicando(true);
+    try {
+      const { db, setDoc, doc } = window.FirebaseAPI;
+      await setDoc(doc(db, 'artifacts', APP_ID, 'publicados', dia.dateString), {
+        fecha: dia.dateString, publicadoEn: Date.now(), firma: firmasDe(tareas), nombres: Object.fromEntries(tareas.map(t => [t.id, etiquetaTarea(t)])), cambios: {}, quitadas: [], cambiosEn: null });
+      await pedirAviso('publicar', dia.dateString, `📣 Ya puedes consultar las tareas de ${textoDia(dia)}`, `${dia.name} ${dia.numeroDia} · ${tareas.length} tareas`);
+    } finally { setPublicando(false); }
+  };
+  const avisarCambios = async (dia) => {
+    const pub = publicados[dia.dateString]; if (!pub) return;
+    const tareas = tareasPublicables(dia);
+    const c = calcularCambios(tareas, pub);
+    const total = c.nuevas.length + c.cambiadas.length + c.quitadas.length;
+    if (total === 0) return;
+    if (!confirm(`¿Avisar a Fabio y Mory de que han cambiado las tareas de ${textoDia(dia)}?\n\n${total} cambio${total > 1 ? 's' : ''}.`)) return;
+    setPublicando(true);
+    try {
+      const cambios = { ...(pub.cambios || {}) }; const quitadas = [...(pub.quitadas || [])]; const nombres = { ...(pub.nombres || {}) };
+      c.nuevas.forEach(t => { cambios[t.id] = 'nueva'; });
+      c.cambiadas.forEach(t => { if (cambios[t.id] !== 'nueva') cambios[t.id] = 'cambiada'; });
+      c.quitadas.forEach(id => { if (cambios[id] === 'nueva') delete cambios[id]; else quitadas.push(nombres[id] || 'Una tarea'); });
+      tareas.forEach(t => { nombres[t.id] = etiquetaTarea(t); });
+      const { db, setDoc, doc } = window.FirebaseAPI;
+      await setDoc(doc(db, 'artifacts', APP_ID, 'publicados', dia.dateString), { ...Object.fromEntries(Object.entries(pub).filter(([k]) => k !== 'id')), firma: firmasDe(tareas), nombres, cambios, quitadas, cambiosEn: Date.now() });
+      const lineas = [...c.nuevas.map(t => 'Nueva: ' + etiquetaTarea(t)), ...c.cambiadas.map(t => 'Cambiada: ' + etiquetaTarea(t)), ...c.quitadas.map(id => 'Quitada: ' + (pub.nombres || {})[id])];
+      await pedirAviso('cambio', dia.dateString, `✏️ Han cambiado las tareas de ${textoDia(dia)}`, lineas.slice(0, 4).join('\n') + (lineas.length > 4 ? `\n… y ${lineas.length - 4} más` : ''));
+    } finally { setPublicando(false); }
+  };
+
   const hayVentana = !!(visor || miTareaId || boardTaskMenu || touchMenu || nuevoDia || showCalendarModal || showSettingsModal || showHistoryDetailModal || editingCatalogTask || editingFinca);
   const cerrarVentanasRef = useRef(null);
   cerrarVentanasRef.current = () => {
@@ -956,6 +1029,11 @@ function App() {
           </button>
         </div>
       </header>
+      {diaPublicable && !publicados[diaPublicable.dateString] && (
+        <button onClick={() => publicarDia(diaPublicable)} disabled={publicando} className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 text-sm font-bold disabled:opacity-50 z-10" title={`Avisar a Fabio y Mory de que las tareas de ${textoDia(diaPublicable)} están listas`}>
+          📣 Tareas de {textoDia(diaPublicable)} listas · Avisar a Fabio y Mory
+        </button>
+      )}
 
       {/* PIZARRA: en el móvil, un día por pantalla (deslizar); en el ordenador, columnas */}
       <div ref={kanbanScrollRef} className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden p-2 flex gap-3 items-stretch bg-slate-100/50 snap-x snap-mandatory sm:snap-none">
@@ -976,6 +1054,19 @@ function App() {
                   <button onClick={() => { setNuevoDia(dia); setNuevoFincaId(null); setAnadidas([]); setParaMi(false); setTextoNueva(''); }} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs font-bold hover:bg-slate-50">＋ Añadir tarea</button>
                   {hayAyer && <button onClick={() => repetirAyer(dia)} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs font-bold hover:bg-slate-50">↻ Repetir día anterior</button>}
                 </div>
+                {publicados[dia.dateString] && (() => {
+                  const pub = publicados[dia.dateString];
+                  const c = calcularCambios(tareasPublicables(dia), pub);
+                  const total = c.nuevas.length + c.cambiadas.length + c.quitadas.length;
+                  const hora = new Date(pub.cambiosEn || pub.publicadoEn).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+                  return total > 0 ? (
+                    <button onClick={() => avisarCambios(dia)} disabled={publicando} className="w-full mt-1.5 py-1.5 rounded-lg bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold hover:bg-amber-200 disabled:opacity-50">
+                      ✏️ {total} cambio{total > 1 ? 's' : ''} sin avisar · Avisar a Fabio y Mory
+                    </button>
+                  ) : (
+                    <div className="mt-1.5 text-center text-xs font-bold text-emerald-800">✅ Publicado a las {hora}{pub.cambiosEn ? ' (con cambios avisados)' : ''}</div>
+                  );
+                })()}
               </div>
 
               <div className="flex-1 p-1.5 space-y-1.5 overflow-y-auto">

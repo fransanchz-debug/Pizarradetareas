@@ -78,4 +78,22 @@ comprobar(not recibido and not guardado, "no se repite el aviso de bienvenida")
 print("5) sin aparatos activados no pasa nada (y no falla)")
 A.leer_coleccion = lambda s, n: [{"id": FRAN}]; recibido.clear(); A.enviar(None, "x\ny")
 comprobar(not recibido, "no se envía nada")
+print("6) «Tareas listas»: solo llega a Fabio y Mory (con la dirección de la espejo); se marca como enviado y no se repite")
+FABIO = sorted(A.CUENTAS_ESPEJO)[0]
+dfab, pf, af = aparato("/fabio"); dfran, _, _ = aparato("/fran2")
+guardado.clear(); recibido.clear()
+def leer(s, n):
+    if n == "avisos": return [{"id": FABIO, "subs": [dfab]}, {"id": FRAN, "subs": [dfran]}]
+    if n == "avisosPendientes": return [{"id": "p1", "titulo": "📣 Ya puedes consultar las tareas de mañana", "cuerpo": "Sábado 28", "fecha": "2026-11-28"},
+                                        {"id": "p0", "titulo": "viejo", "cuerpo": "", "enviado": True, "enviadoEn": 1, "fecha": "x"}]
+    return []
+A.leer_coleccion = leer
+borrados = []; A.borrar_doc = lambda s, r: borrados.append(r)
+A.enviar_pendientes(None)
+comprobar([x["ruta"] for x in recibido] == ["/fabio"], f"solo a la espejo: {[x['ruta'] for x in recibido]}")
+d = descifrar(recibido[0], pf, af)
+comprobar(d["titulo"].startswith("📣 Ya puedes") and d["url"] == A.URL_ESPEJO, "título y dirección de la espejo")
+comprobar(("avisosPendientes/p1", {"enviado": True, "enviadoEn": guardado[-1][1]["enviadoEn"], "aparatos": 1}) in guardado, "queda marcado como enviado")
+comprobar(borrados == ["avisosPendientes/p0"], "los avisos viejos ya enviados se limpian")
+
 print("\nRESULTADO:", "TODO BIEN" if not fallos else f"{fallos} FALLOS"); sys.exit(1 if fallos else 0)
