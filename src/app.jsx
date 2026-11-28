@@ -204,14 +204,14 @@ function CalendarioSemana({ boardTasks, historyTasks, fincas, hoyStr, user }) {
           const tareas = tareasDe(d.fecha); const esHoy = d.fecha === hoyStr;
           return (
             <div key={d.fecha} data-dia={d.fecha} className="flex flex-col min-w-0 min-h-0">
-              <div className={`shrink-0 text-center text-[13px] font-extrabold leading-tight py-0.5 ${esHoy ? 'bg-emerald-600 text-white' : d.fecha < hoyStr ? 'bg-slate-100 text-slate-500' : 'bg-slate-200 text-slate-800'}`}>{d.nombre} {d.num}</div>
+              <div className={`shrink-0 text-center font-extrabold leading-tight py-0.5 ${esHoy ? 'bg-emerald-600 text-white' : d.fecha < hoyStr ? 'bg-slate-100 text-slate-500' : 'bg-slate-200 text-slate-800'}`} style={{ fontSize: 'var(--cal-d, 14px)' }}>{d.nombre} {d.num}</div>
               <div className="flex-1 min-h-0 overflow-y-auto p-0.5 space-y-0.5 bg-slate-50">
                 {tareas.map(t => { const f = finca(t.fincaId); return (
                   <div key={t.id} className={`flex bg-white border ${f.color.split(' ')[1]} rounded overflow-hidden`}>
                     <div className={`w-1 shrink-0 ${f.handleColor}`}></div>
                     <div className="px-1 py-0.5 min-w-0 leading-[1.1]">
-                      <div className="text-[11px] font-black text-slate-500">{etiqueta(f.name)}</div>
-                      <div className="text-[13px] font-semibold text-slate-800 line-clamp-2 break-words">{t.description}</div>
+                      <div className="font-black text-slate-500" style={{ fontSize: 'var(--cal-e, 12px)' }}>{etiqueta(f.name)}</div>
+                      <div className="font-semibold text-slate-800 line-clamp-3" style={{ fontSize: 'var(--cal-t, 17px)', hyphens: 'auto', WebkitHyphens: 'auto', overflowWrap: 'break-word' }}>{t.description}</div>
                     </div>
                   </div>); })}
               </div>
