@@ -152,5 +152,5 @@ por identificador (`pizarra_trabajadores`), así que eso no se rompe.
 
 ## Calendario semanal (móvil de lado) — 28/11/2026
 - Sin botón: en un móvil en horizontal (`innerWidth > innerHeight` y alto ≤ 520 px; ordenador y tablet no) aparece `CalendarioSemana` a pantalla completa:
-  lunes a domingo, una columna por día, solo lectura (finca + nombre de la tarea a 2 líneas, sin trabajadores). Flechas ◀ ▶ para otras semanas.
+  lunes a domingo, una columna por día, solo lectura (finca + nombre de la tarea a 2 líneas, sin trabajadores). Se cambia de semana DESLIZANDO el dedo (izquierda = siguiente, derecha = anterior); sin flechas. Letra elegida por Fran: opción B (variables CSS `--cal-t` 17px, `--cal-e` 12px, `--cal-d` 14px; hasta 3 líneas con guiones).
   Los días pasados salen del histórico (se lee desde el lunes mostrado). Al volver a vertical desaparece. Solo en la pizarra (no en la espejo). Prueba: `t17.js`.

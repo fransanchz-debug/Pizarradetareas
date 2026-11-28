@@ -168,6 +168,7 @@ const calcularCambios = (tareas, pub) => {
 const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 function CalendarioSemana({ boardTasks, historyTasks, fincas, hoyStr, user }) {
   const [semana, setSemana] = useState(0); // 0 = esta semana, -1 = la anterior, 1 = la siguiente
+  const toque = useRef(null);
   const [historiaSemana, setHistoriaSemana] = useState([]);
   const hoy = new Date(hoyStr + 'T12:00:00');
   const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7) + semana * 7);
@@ -193,11 +194,16 @@ function CalendarioSemana({ boardTasks, historyTasks, fincas, hoyStr, user }) {
   const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
   const rango = `${dias[0].num}${dias[0].fecha.slice(5, 7) !== dias[6].fecha.slice(5, 7) ? ' ' + meses[Number(dias[0].fecha.slice(5, 7)) - 1] : ''} – ${dias[6].num} ${meses[Number(dias[6].fecha.slice(5, 7)) - 1]}`;
   return (
-    <div data-calendario className="fixed inset-0 z-40 bg-white flex flex-col" style={{ paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
-      <div className="shrink-0 flex items-center justify-center gap-3 py-0.5 bg-slate-800 text-white text-[12px] font-bold">
-        <button onClick={() => setSemana(semana - 1)} className="px-3" aria-label="Semana anterior">◀</button>
-        <span>{semana === 0 ? 'Esta semana' : semana === -1 ? 'Semana pasada' : semana === 1 ? 'Próxima semana' : 'Semana'} · {rango}</span>
-        <button onClick={() => setSemana(semana + 1)} className="px-3" aria-label="Semana siguiente">▶</button>
+    <div data-calendario className="fixed inset-0 z-40 bg-white flex flex-col"
+      onTouchStart={(e) => { const t = e.touches[0]; toque.current = { x: t.clientX, y: t.clientY }; }}
+      onTouchEnd={(e) => { // deslizar el dedo hacia un lado: cambia de semana (hacia la izquierda = la siguiente)
+        const i = toque.current; toque.current = null; if (!i) return;
+        const t = e.changedTouches[0]; const dx = t.clientX - i.x, dy = t.clientY - i.y;
+        if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) setSemana(s => s + (dx < 0 ? 1 : -1));
+      }}
+      style={{ paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
+      <div className="shrink-0 text-center py-0.5 bg-slate-800 text-white text-[12px] font-bold">
+        {semana === 0 ? 'Esta semana' : semana === -1 ? 'Semana pasada' : semana === 1 ? 'Próxima semana' : 'Semana'} · {rango}
       </div>
       <div className="flex-1 min-h-0 grid grid-cols-7 divide-x divide-slate-200">
         {dias.map(d => {
