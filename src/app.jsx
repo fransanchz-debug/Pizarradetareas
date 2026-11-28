@@ -194,7 +194,7 @@ function CalendarioSemana({ boardTasks, historyTasks, fincas, hoyStr, user }) {
   const rango = `${dias[0].num}${dias[0].fecha.slice(5, 7) !== dias[6].fecha.slice(5, 7) ? ' ' + meses[Number(dias[0].fecha.slice(5, 7)) - 1] : ''} – ${dias[6].num} ${meses[Number(dias[6].fecha.slice(5, 7)) - 1]}`;
   return (
     <div data-calendario className="fixed inset-0 z-40 bg-white flex flex-col" style={{ paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
-      <div className="shrink-0 flex items-center justify-center gap-3 py-0.5 bg-slate-800 text-white text-[11px] font-bold">
+      <div className="shrink-0 flex items-center justify-center gap-3 py-0.5 bg-slate-800 text-white text-[12px] font-bold">
         <button onClick={() => setSemana(semana - 1)} className="px-3" aria-label="Semana anterior">◀</button>
         <span>{semana === 0 ? 'Esta semana' : semana === -1 ? 'Semana pasada' : semana === 1 ? 'Próxima semana' : 'Semana'} · {rango}</span>
         <button onClick={() => setSemana(semana + 1)} className="px-3" aria-label="Semana siguiente">▶</button>
@@ -204,14 +204,14 @@ function CalendarioSemana({ boardTasks, historyTasks, fincas, hoyStr, user }) {
           const tareas = tareasDe(d.fecha); const esHoy = d.fecha === hoyStr;
           return (
             <div key={d.fecha} data-dia={d.fecha} className="flex flex-col min-w-0 min-h-0">
-              <div className={`shrink-0 text-center text-[11px] font-extrabold leading-tight py-0.5 ${esHoy ? 'bg-emerald-600 text-white' : d.fecha < hoyStr ? 'bg-slate-100 text-slate-500' : 'bg-slate-200 text-slate-800'}`}>{d.nombre} {d.num}</div>
+              <div className={`shrink-0 text-center text-[13px] font-extrabold leading-tight py-0.5 ${esHoy ? 'bg-emerald-600 text-white' : d.fecha < hoyStr ? 'bg-slate-100 text-slate-500' : 'bg-slate-200 text-slate-800'}`}>{d.nombre} {d.num}</div>
               <div className="flex-1 min-h-0 overflow-y-auto p-0.5 space-y-0.5 bg-slate-50">
                 {tareas.map(t => { const f = finca(t.fincaId); return (
                   <div key={t.id} className={`flex bg-white border ${f.color.split(' ')[1]} rounded overflow-hidden`}>
                     <div className={`w-1 shrink-0 ${f.handleColor}`}></div>
                     <div className="px-1 py-0.5 min-w-0 leading-[1.1]">
-                      <div className="text-[9px] font-black text-slate-500">{etiqueta(f.name)}</div>
-                      <div className="text-[10px] font-semibold text-slate-800 line-clamp-2 break-words">{t.description}</div>
+                      <div className="text-[11px] font-black text-slate-500">{etiqueta(f.name)}</div>
+                      <div className="text-[13px] font-semibold text-slate-800 line-clamp-2 break-words">{t.description}</div>
                     </div>
                   </div>); })}
               </div>
