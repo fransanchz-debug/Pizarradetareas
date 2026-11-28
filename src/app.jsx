@@ -163,6 +163,67 @@ const calcularCambios = (tareas, pub) => {
   };
 };
 
+// ===== CALENDARIO SEMANAL (al girar el móvil de lado) =====
+// Solo lectura: lunes a domingo, una columna por día, con lo mínimo de cada tarea. Aparece solo en un móvil en horizontal.
+const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function CalendarioSemana({ boardTasks, historyTasks, fincas, hoyStr, user }) {
+  const [semana, setSemana] = useState(0); // 0 = esta semana, -1 = la anterior, 1 = la siguiente
+  const [historiaSemana, setHistoriaSemana] = useState([]);
+  const hoy = new Date(hoyStr + 'T12:00:00');
+  const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7) + semana * 7);
+  const dias = Array.from({ length: 7 }, (_, i) => { const d = new Date(lunes); d.setDate(lunes.getDate() + i); return { fecha: isoLocal(d), num: d.getDate(), nombre: ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'][i] }; });
+  const desde = dias[0].fecha, hasta = dias[6].fecha;
+  // Los días ya pasados están en el histórico: se leen solo desde el lunes que se mira
+  useEffect(() => {
+    if (!user || !window.FirebaseAPI || desde >= hoyStr) { setHistoriaSemana([]); return; }
+    const { db, collection, query, where, onSnapshot } = window.FirebaseAPI;
+    return onSnapshot(query(collection(db, 'artifacts', APP_ID, 'history'), where('snapshotDate', '>=', desde)), (snap) => {
+      const items = []; snap.forEach(d => items.push({ ...d.data(), id: d.id })); setHistoriaSemana(items);
+    });
+  }, [user, desde, hoyStr]);
+  const tareasDe = (fecha) => {
+    const porId = new Map();
+    [...historyTasks, ...historiaSemana].filter(t => t.snapshotDate === fecha).forEach(t => porId.set(String(t.id).split('_').slice(1).join('_') || t.id, t));
+    boardTasks.filter(t => (t.targetDateStr || t.dateString) === fecha).forEach(t => porId.set(t.id, t));
+    return [...porId.values()].sort((a, b) => (a.order || 0) - (b.order || 0));
+  };
+  const nombreF = (n) => (n || '?').replace(/\s*y\s*/gi, ' y ').replace(/\s+/g, ' ').trim();
+  const finca = (id) => { const f = fincas.find(f => f.id === id); return f ? { ...f, name: nombreF(f.name) } : { name: '?', color: 'bg-gray-100 border-gray-400', handleColor: 'bg-gray-400' }; };
+  const etiqueta = (n) => 'F' + nombreF(n).replace(/^finca\s*/i, '').replace(/ y /g, '-').replace(/\s+/g, '');
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const rango = `${dias[0].num}${dias[0].fecha.slice(5, 7) !== dias[6].fecha.slice(5, 7) ? ' ' + meses[Number(dias[0].fecha.slice(5, 7)) - 1] : ''} – ${dias[6].num} ${meses[Number(dias[6].fecha.slice(5, 7)) - 1]}`;
+  return (
+    <div data-calendario className="fixed inset-0 z-40 bg-white flex flex-col" style={{ paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
+      <div className="shrink-0 flex items-center justify-center gap-3 py-0.5 bg-slate-800 text-white text-[11px] font-bold">
+        <button onClick={() => setSemana(semana - 1)} className="px-3" aria-label="Semana anterior">◀</button>
+        <span>{semana === 0 ? 'Esta semana' : semana === -1 ? 'Semana pasada' : semana === 1 ? 'Próxima semana' : 'Semana'} · {rango}</span>
+        <button onClick={() => setSemana(semana + 1)} className="px-3" aria-label="Semana siguiente">▶</button>
+      </div>
+      <div className="flex-1 min-h-0 grid grid-cols-7 divide-x divide-slate-200">
+        {dias.map(d => {
+          const tareas = tareasDe(d.fecha); const esHoy = d.fecha === hoyStr;
+          return (
+            <div key={d.fecha} data-dia={d.fecha} className="flex flex-col min-w-0 min-h-0">
+              <div className={`shrink-0 text-center text-[11px] font-extrabold leading-tight py-0.5 ${esHoy ? 'bg-emerald-600 text-white' : d.fecha < hoyStr ? 'bg-slate-100 text-slate-500' : 'bg-slate-200 text-slate-800'}`}>{d.nombre} {d.num}</div>
+              <div className="flex-1 min-h-0 overflow-y-auto p-0.5 space-y-0.5 bg-slate-50">
+                {tareas.map(t => { const f = finca(t.fincaId); return (
+                  <div key={t.id} className={`flex bg-white border ${f.color.split(' ')[1]} rounded overflow-hidden`}>
+                    <div className={`w-1 shrink-0 ${f.handleColor}`}></div>
+                    <div className="px-1 py-0.5 min-w-0 leading-[1.1]">
+                      <div className="text-[9px] font-black text-slate-500">{etiqueta(f.name)}</div>
+                      <div className="text-[10px] font-semibold text-slate-800 line-clamp-2 break-words">{t.description}</div>
+                    </div>
+                  </div>); })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+// ===== FIN CALENDARIO SEMANAL =====
+
 function App() {
   const [user, setUser] = useState(null);
   const [fincas, setFincas] = useState([]);
@@ -182,6 +243,12 @@ function App() {
   const [avisosConfig, setAvisosConfig] = useState({});
   const [publicados, setPublicados] = useState({}); // fecha -> documento publicados/{fecha}
   const [publicando, setPublicando] = useState(false);
+  const [apaisado, setApaisado] = useState(false); // móvil de lado: se enseña el calendario de la semana
+  useEffect(() => {
+    const f = () => setApaisado(window.innerWidth > window.innerHeight && window.innerHeight <= 520); // solo móviles (no ordenador ni tablet)
+    f(); window.addEventListener('resize', f); window.addEventListener('orientationchange', f);
+    return () => { window.removeEventListener('resize', f); window.removeEventListener('orientationchange', f); };
+  }, []);
   const [miAviso, setMiAviso] = useState(null);
   const [avisosEdit, setAvisosEdit] = useState({});
   const [editingFinca, setEditingFinca] = useState(null);
@@ -1962,6 +2029,7 @@ function App() {
         </div>
       )})()}
 
+      {apaisado && hoyStr && <CalendarioSemana boardTasks={boardTasks} historyTasks={historyTasks} fincas={fincas} hoyStr={hoyStr} user={user} />}
     </div>
   );
 }

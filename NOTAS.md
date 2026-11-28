@@ -149,3 +149,8 @@ por identificador (`pizarra_trabajadores`), así que eso no se rompe.
   prioridad, trabajadores y nº de fotos. OJO: la copia automática de cuadrillas de la emergencia cuenta como cambio si el día ya estaba publicado.
 - Los de la espejo activan sus avisos en 📲 (también instalan la app). Reglas: leen `publicados` y su propio `avisos/{uid}` (NADA más). `espejo/sw.js` es copia de `sw.js`.
 - Al estrenarlo se creó a mano `publicados/2026-11-27` (campo `semilla`) para que hoy no se quedara vacío.
+
+## Calendario semanal (móvil de lado) — 28/11/2026
+- Sin botón: en un móvil en horizontal (`innerWidth > innerHeight` y alto ≤ 520 px; ordenador y tablet no) aparece `CalendarioSemana` a pantalla completa:
+  lunes a domingo, una columna por día, solo lectura (finca + nombre de la tarea a 2 líneas, sin trabajadores). Flechas ◀ ▶ para otras semanas.
+  Los días pasados salen del histórico (se lee desde el lunes mostrado). Al volver a vertical desaparece. Solo en la pizarra (no en la espejo). Prueba: `t17.js`.
